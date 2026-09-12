@@ -220,12 +220,12 @@ public final class GPhoto2PTPClient: PTPClientProtocol, @unchecked Sendable {
     
     // MARK: - Convert RAF
     
-    public func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)?) async throws -> JPEGFile? {
+    public func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)?) async -> RAFConversionOutcome {
         // gphoto2 does not expose a RAW-file upload API, and the X100VI preset
         // range is not visible through its config tree.  RAF conversion is
         // intentionally unsupported via this backend; use the X100VI libusb
         // helper (`X100VIHelperClient`) instead.
-        throw PTPError.platformError("RAF conversion is not supported through the gphoto2 CLI backend")
+        .failed(message: "RAF conversion is not supported through the gphoto2 CLI backend")
     }
     
     // MARK: - Capture Preview

@@ -16,10 +16,18 @@ public struct CameraConnectionView: View {
     @State private var isConnecting = false
     @State private var showLimitationsAlert = false
     @State private var showTroubleshooting = false
+    @State private var slotRefreshMessage: String?
+    @State private var confirmOverwriteDrafts = false
+    private let cameraSessionFactory: CameraSessionFactory
 
-    public init(manager: CameraManager, loadouts: LoadoutStore) {
+    public init(
+        manager: CameraManager,
+        loadouts: LoadoutStore,
+        cameraSessionFactory: @escaping CameraSessionFactory = { X100VIHelperClient() }
+    ) {
         self.manager = manager
         self.loadouts = loadouts
+        self.cameraSessionFactory = cameraSessionFactory
     }
 
     public var body: some View {
@@ -66,6 +74,12 @@ public struct CameraConnectionView: View {
         }
         .sheet(isPresented: $showTroubleshooting) {
             TroubleshootingView(isPresented: $showTroubleshooting)
+        }
+        .confirmationDialog("Replace local drafts with camera data?", isPresented: $confirmOverwriteDrafts) {
+            Button("Replace Local Drafts", role: .destructive) { refreshSlots(overwriteDrafts: true) }
+            Button("Keep Local Drafts", role: .cancel) { refreshSlots(overwriteDrafts: false) }
+        } message: {
+            Text("Only successfully read slots are updated. Local drafts are kept unless you choose replacement.")
         }
     }
 
@@ -185,10 +199,10 @@ public struct CameraConnectionView: View {
 
     private var connectionStateText: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(manager.status == .connected ? "Session Active" : "Ready to Connect")
+            Text(manager.status == .connected ? "Session Active" : (manager.status == .error ? "Retry Available" : "Ready to Connect"))
                 .font(.subheadline.weight(.semibold))
                 .glassPrimary()
-            Text(manager.status == .connected ? "Custom loadouts are synchronized with camera memory." : "Connect over USB-C to inspect camera state.")
+            Text(manager.status == .connected ? "Camera reads and local drafts are tracked separately." : "Connect over USB-C to inspect camera state.")
                 .font(.caption2)
                 .glassSecondary()
                 .lineLimit(2)
@@ -196,19 +210,7 @@ public struct CameraConnectionView: View {
     }
 
     private var connectActionButton: some View {
-        Button {
-            Task {
-                if manager.status == .connected {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        manager.disconnect()
-                    }
-                } else {
-                    isConnecting = true
-                    defer { isConnecting = false }
-                    await manager.connect(using: X100VIHelperClient(), loadouts: loadouts)
-                }
-            }
-        } label: {
+        Button(action: toggleConnection) {
             HStack(spacing: 6) {
                 if isConnecting {
                     ProgressView()
@@ -225,6 +227,10 @@ public struct CameraConnectionView: View {
         }
         .buttonStyle(GlassProminentButtonStyle(color: manager.status == .connected ? Theme.fujiRed : Theme.emeraldGreen, height: 36))
         .disabled(isConnecting)
+        .accessibilityLabel(manager.status == .connected ? "Disconnect camera" : "Connect camera")
+        .accessibilityHint(manager.status == .connected
+            ? "Ends the current USB camera session."
+            : "Starts a USB camera session.")
     }
 
     private func telemetryBadge(label: String, value: String) -> some View {
@@ -266,6 +272,7 @@ public struct CameraConnectionView: View {
                 }
                 .buttonStyle(GlassBorderedButtonStyle(accentColor: Theme.fujiAmber, height: 30))
                 .frame(width: 150)
+                .accessibilityHint("Opens USB camera connection troubleshooting steps.")
             }
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
@@ -284,9 +291,11 @@ public struct CameraConnectionView: View {
                 }
                 .buttonStyle(GlassBorderedButtonStyle(accentColor: Theme.fujiAmber, height: 30))
                 .frame(maxWidth: .infinity)
+                .accessibilityHint("Opens USB camera connection troubleshooting steps.")
             }
         }
         .glassCard(padding: 14, tint: Theme.fujiAmber.opacity(0.06), borderColor: Theme.fujiAmber.opacity(0.3))
+        .accessibilityLabel("Connection diagnostic: \(error)")
     }
 
     private var connectedDialBankHUD: some View {
@@ -296,9 +305,18 @@ public struct CameraConnectionView: View {
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
-                Text("\(loadouts.loadoutCountWithSettings()) / 7 SYNCHRONIZED")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Theme.emeraldGreen)
+                Button("Refresh") {
+                    if loadouts.dirtySlots.isEmpty { refreshSlots(overwriteDrafts: false) }
+                    else { confirmOverwriteDrafts = true }
+                }
+                .disabled(manager.operation == .readingSlots)
+                .accessibilityHint("Reads C1 through C7 from the connected camera.")
+                if manager.operation == .readingSlots { ProgressView().controlSize(.small) }
+            }
+            if let slotRefreshMessage {
+                Text(slotRefreshMessage)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
             }
 
             LazyVGrid(columns: [
@@ -322,7 +340,7 @@ public struct CameraConnectionView: View {
                                 .shadow(color: isConfigured ? accent.opacity(0.8) : Color.clear, radius: 3)
                         }
 
-                        Text(isNeverConfigured ? "New profile" : (loadout?.recipeName ?? "Empty"))
+                        Text(slotLabel(loadout, isNeverConfigured: isNeverConfigured))
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(isConfigured ? Theme.textPrimary : Theme.textMuted)
                             .lineLimit(1)
@@ -333,6 +351,36 @@ public struct CameraConnectionView: View {
             }
         }
         .glassPanel(padding: 14)
+    }
+
+    private func slotLabel(_ loadout: Loadout?, isNeverConfigured: Bool) -> String {
+        if let loadout, loadouts.isDirty(loadout.slot) { return "Local draft (not written)" }
+        if isNeverConfigured { return "Camera reports empty" }
+        guard let loadout else { return "Not read" }
+        return loadout.provenance == .cameraSynced ? "Camera-synced" : "Local draft"
+    }
+
+    private func refreshSlots(overwriteDrafts: Bool) {
+        Task {
+            let result = await manager.refreshCameraSlots(into: loadouts, overwriteDirtyDrafts: overwriteDrafts)
+            slotRefreshMessage = result.isComplete
+                ? "Read all seven camera slots."
+                : "Partial read: \(result.presets.count)/7. Failed \(result.failures.map { "C\($0.slot)" }.joined(separator: ", "))."
+        }
+    }
+
+    private func toggleConnection() {
+        Task {
+            if manager.status == .connected {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    manager.disconnect()
+                }
+            } else {
+                isConnecting = true
+                defer { isConnecting = false }
+                await manager.connect(using: cameraSessionFactory(), loadouts: loadouts)
+            }
+        }
     }
 
     private var connectionGuideCard: some View {
@@ -413,7 +461,6 @@ public struct RAFDarkroomView: View {
     @ObservedObject public var manager: CameraManager
     @State private var converting = false
     @State private var selectedRAFPath: URL?
-    @State private var conversionProgress: Double = 0.0
     @State private var conversionStatus = "Ready"
     @State private var conversionError: String? = nil
     @State private var showFileChooser = false
@@ -467,6 +514,7 @@ public struct RAFDarkroomView: View {
             set: { if !$0 { conversionError = nil } }
         )) {
             Button("OK") { conversionError = nil }
+                .keyboardShortcut(.defaultAction)
         } message: {
             if let err = conversionError { Text(err) }
         }
@@ -532,6 +580,8 @@ public struct RAFDarkroomView: View {
                                 .foregroundStyle(Theme.textTertiary)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Remove selected RAF file")
+                        .accessibilityHint("Clears the current RAW file selection.")
                     }
                     .padding(12)
                     .glassCard(padding: 0, radius: 10, tint: Theme.emeraldGreen.opacity(0.08), borderColor: Theme.emeraldGreen.opacity(0.4))
@@ -557,6 +607,8 @@ public struct RAFDarkroomView: View {
                         .glassCard(padding: 0, radius: 12, tint: Color.white.opacity(0.02), borderColor: Theme.fujiAmber.opacity(0.3))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Choose RAF raw file")
+                    .accessibilityHint("Opens a file picker for a Fujifilm RAF file.")
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
             }
@@ -574,9 +626,8 @@ public struct RAFDarkroomView: View {
 
                 if converting {
                     VStack(spacing: 10) {
-                        ProgressView(value: conversionProgress)
+                        ProgressView()
                             .tint(Theme.cyanAccent)
-                            .animation(.linear(duration: 0.2), value: conversionProgress)
 
                         HStack {
                             Text(conversionStatus)
@@ -584,10 +635,9 @@ public struct RAFDarkroomView: View {
                                 .foregroundStyle(Theme.cyanAccent)
                                 .lineLimit(1)
                             Spacer()
-                            Text(String(format: "%.0f%%", conversionProgress * 100))
+                            Text("WORKING")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                                 .glassPrimary()
-                                .contentTransition(.numericText())
                         }
                     }
                     .padding(14)
@@ -605,7 +655,7 @@ public struct RAFDarkroomView: View {
                         }
                     }
                     .buttonStyle(GlassProminentButtonStyle(color: Theme.cyanAccent, height: 38))
-                    .disabled(selectedRAFPath == nil)
+                    .disabled(selectedRAFPath == nil || manager.status != .connected)
                     .transition(.opacity)
                 }
             }
@@ -620,7 +670,7 @@ public struct RAFDarkroomView: View {
                     Text("Output Delivery Note")
                         .font(.caption.weight(.semibold))
                         .glassPrimary()
-                    Text("The X100VI processes the RAW file with its internal imaging pipeline. The developed high-resolution JPEG is saved directly to the camera's SD card and LCD playback buffer.")
+                    Text("The transport can verify that the conversion trigger was accepted, but this macOS backend cannot verify JPEG delivery. Check the camera manually; keep this source selected to retry.")
                         .font(.caption2)
                         .glassSecondary()
                         .lineLimit(3)
@@ -636,45 +686,35 @@ public struct RAFDarkroomView: View {
 
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             converting = true
-            conversionProgress = 0.0
-            conversionStatus = "Uploading RAF to X100VI buffer…"
+            conversionStatus = "Reading the selected RAF and sending it to the camera…"
         }
 
         Task {
             do {
+                guard rafPath.startAccessingSecurityScopedResource() else {
+                    throw CameraError.fileAccessDenied
+                }
+                defer { rafPath.stopAccessingSecurityScopedResource() }
                 let rafData = try Data(contentsOf: rafPath)
                 let raf = RAFFile(name: rafPath.lastPathComponent, data: rafData)
-
-                let progressTask = Task {
-                    while !Task.isCancelled {
-                        try? await Task.sleep(nanoseconds: 100_000_000)
-                        if Task.isCancelled { break }
-                        conversionProgress = (conversionProgress + 0.04).truncatingRemainder(dividingBy: 1.0)
-                    }
+                conversionStatus = "Waiting for camera conversion trigger…"
+                switch await manager.convertRAF(raf) {
+                case .downloadedJPEG:
+                    conversionStatus = "JPEG data was returned by the camera."
+                case .triggerAcceptedOutputNotRetrievable:
+                    conversionStatus = "Conversion trigger accepted; JPEG delivery was not verified."
+                case .cancelled:
+                    conversionStatus = "Conversion was cancelled. Keep the RAF selected to retry."
+                case .failed(let message):
+                    conversionStatus = "Conversion could not be completed. Keep the RAF selected and retry after reconnecting the camera."
+                    conversionError = "\(message)\n\nKeep the selected RAF and retry after reconnecting the camera or power-cycling it."
                 }
-
-                let result = try await manager.convertRAF(raf)
-                progressTask.cancel()
-
-                conversionProgress = 1.0
-                if result != nil {
-                    conversionStatus = "✓ RAW conversion complete! Saved to SD card."
-                } else {
-                    conversionStatus = "✓ Conversion triggered on X100VI hardware. Check camera LCD/card."
-                }
-
-                try await Task.sleep(nanoseconds: 2_500_000_000)
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    converting = false
-                    selectedRAFPath = nil
-                    conversionProgress = 0.0
-                    conversionStatus = "Ready"
-                }
+                converting = false
 
             } catch {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    conversionStatus = "Error: \(error.localizedDescription)"
-                    conversionError = conversionStatus
+                    conversionStatus = "Conversion could not be completed. Keep the RAF selected and retry after reconnecting the camera."
+                    conversionError = "\(error.localizedDescription)\n\nKeep the selected RAF and retry after reconnecting the camera or power-cycling it."
                     converting = false
                 }
             }
@@ -712,7 +752,7 @@ public struct LimitationsView: View {
                             )
                             limitationRow(
                                 title: "RAF Darkroom Result Delivery",
-                                desc: "Converted JPEGs are written directly into camera high-speed SD storage and displayed on the X100VI rear LCD screen."
+                                desc: "The macOS transport can confirm a conversion trigger, but cannot currently confirm where—or whether—the camera delivers a JPEG."
                             )
                             limitationRow(
                                 title: "Recovery / Settle Delays",
@@ -729,6 +769,7 @@ public struct LimitationsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { isPresented = false }
                         .buttonStyle(GlassProminentButtonStyle(color: Theme.fujiAmber, height: 30))
+                        .keyboardShortcut(.defaultAction)
                 }
             }
         }
@@ -810,6 +851,7 @@ public struct TroubleshootingView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { isPresented = false }
                         .buttonStyle(GlassProminentButtonStyle(color: Theme.fujiAmber, height: 30))
+                        .keyboardShortcut(.defaultAction)
                 }
             }
         }

@@ -38,8 +38,10 @@ public protocol PTPClientProtocol: Sendable {
     /// Write a Recipe's PTP-mapped settings to the camera.
     func writePTPSettings(from recipe: Recipe) async throws
     
-    /// Convert RAF to JPEG via the camera's built-in converter.
-    func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)?) async throws -> JPEGFile?
+    /// Convert RAF using the camera's built-in converter. The outcome makes
+    /// the distinction between a downloaded JPEG and an accepted trigger whose
+    /// camera-side output cannot be retrieved by this transport explicit.
+    func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)?) async -> RAFConversionOutcome
     
     /// Capture a preview image from the camera.
     func capturePreview() async throws -> JPEGFile?
@@ -122,9 +124,25 @@ public enum PTPError: Swift.Error, Sendable, LocalizedError {
     }
 }
 
+/// The terminal result of a camera-side RAF conversion.
+///
+/// A trigger may be accepted even where the macOS transport cannot retrieve
+/// the produced JPEG. Callers must not infer a JPEG from trigger acceptance.
+public enum RAFConversionOutcome: Sendable {
+    case downloadedJPEG(JPEGFile)
+    case triggerAcceptedOutputNotRetrievable(reason: String)
+    case cancelled
+    case failed(message: String)
+
+    public var jpeg: JPEGFile? {
+        guard case .downloadedJPEG(let jpeg) = self else { return nil }
+        return jpeg
+    }
+}
+
 // MARK: - PTP Client Preset Data
 
-public struct PTPClientPresetData: Sendable {
+public struct PTPClientPresetData: Sendable, Equatable {
     public let slot: Int
     public let name: String
     /// True only when the camera explicitly reported its empty/raw-zero
@@ -219,10 +237,74 @@ public struct PTPPresetSlotWriteResult: Sendable, Equatable {
     /// Requested properties that the camera reported as inapplicable, rather
     /// than a failed or unverified write.
     public let warnings: [String]
+    /// The pre-write state observed by the model. An empty sentinel is not a
+    /// writable baseline and is deliberately never used for rollback.
+    public let baseline: PTPPresetSlotBaseline?
+    /// Recovery attempted after a failed write. Successful writes are
+    /// `.notNeeded`.
+    public let rollback: PTPPresetSlotRollbackOutcome
 
-    public init(slot: Int, createdFromEmpty: Bool = false, warnings: [String] = []) {
+    public init(
+        slot: Int,
+        createdFromEmpty: Bool = false,
+        warnings: [String] = [],
+        baseline: PTPPresetSlotBaseline? = nil,
+        rollback: PTPPresetSlotRollbackOutcome = .notNeeded
+    ) {
         self.slot = slot
         self.createdFromEmpty = createdFromEmpty
         self.warnings = warnings
+        self.baseline = baseline
+        self.rollback = rollback
+    }
+}
+
+/// A C-slot state captured before mutation.
+public enum PTPPresetSlotBaseline: Sendable, Equatable {
+    case configured(PTPClientPresetData)
+    case emptySentinel
+}
+
+/// Independent result of attempting to restore a pre-write configured slot.
+public enum PTPPresetSlotRollbackOutcome: Sendable, Equatable {
+    case notNeeded
+    case restored
+    case notAttemptedEmptySentinel
+    case failed(String)
+}
+
+/// A C-slot write failed after the model captured a baseline. The rollback
+/// result is intentionally separate from the original write error.
+public struct PTPPresetSlotWriteRecoveryError: Error, Sendable, LocalizedError {
+    public let slot: Int
+    public let writeErrorDescription: String
+    public let baseline: PTPPresetSlotBaseline
+    public let rollback: PTPPresetSlotRollbackOutcome
+
+    public init(
+        slot: Int,
+        writeError: Error,
+        baseline: PTPPresetSlotBaseline,
+        rollback: PTPPresetSlotRollbackOutcome
+    ) {
+        self.slot = slot
+        self.writeErrorDescription = writeError.localizedDescription
+        self.baseline = baseline
+        self.rollback = rollback
+    }
+
+    public var errorDescription: String? {
+        let recovery: String
+        switch rollback {
+        case .restored:
+            recovery = "The previous configured C\(slot) values were restored."
+        case .notAttemptedEmptySentinel:
+            recovery = "The slot was an empty camera sentinel, so no raw-zero rollback was attempted."
+        case .failed(let message):
+            recovery = "Rollback failed: \(message)"
+        case .notNeeded:
+            recovery = "No rollback was required."
+        }
+        return "C\(slot) write failed: \(writeErrorDescription). \(recovery)"
     }
 }

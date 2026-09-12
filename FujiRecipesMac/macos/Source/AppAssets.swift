@@ -1,13 +1,11 @@
 import SwiftUI
 import AppKit
 
-/// Loads bundled Fujifilm-themed illustrations with crisp Retina vector fallbacks.
+/// Loads the illustrations that are actually compiled into `Assets.xcassets`.
 public enum AppArt: String {
     case cameraConnect   = "CameraConnect"
     case darkroomHero    = "DarkroomHero"
     case filmStrip       = "FilmStrip"
-    case windowBackground = "WindowBackground"
-    case sidebarMark     = "SidebarMark"
 
     @MainActor private static let cache = NSCache<NSString, NSImage>()
 
@@ -15,10 +13,10 @@ public enum AppArt: String {
         if let cached = AppArt.cache.object(forKey: rawValue as NSString) {
             return cached
         }
-        let bundle = Bundle.main
-        if let url = bundle.url(forResource: rawValue, withExtension: "png", subdirectory: "Illustrations")
-            ?? bundle.url(forResource: rawValue, withExtension: "png"),
-           let image = NSImage(contentsOf: url) {
+        // Asset catalogs do not expose stable loose-file URLs in a packaged
+        // app. `NSImage(named:)` is the supported lookup for both Debug and
+        // release bundles.
+        if let image = NSImage(named: NSImage.Name(rawValue)) {
             AppArt.cache.setObject(image, forKey: rawValue as NSString)
             return image
         }

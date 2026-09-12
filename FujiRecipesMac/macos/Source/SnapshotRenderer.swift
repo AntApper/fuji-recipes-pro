@@ -12,10 +12,10 @@ public enum SnapshotRenderer {
 
     public static func renderSnapshots() {
         let store = RecipeStore()
-        store.loadRecipes()
+        store.loadRecipesSynchronously()
         let camera = CameraManager()
 
-        let outputDir = URL(fileURLWithPath: "/Users/ant/Documents/project/fuji-recipes-research/docs/screenshots")
+        let outputDir = snapshotOutputDirectory()
         try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
 
         let tag = "v3"
@@ -30,7 +30,7 @@ public enum SnapshotRenderer {
                     .environment(\.snapshotMode, true)
             )),
             ("custom_dial_matrix_\(tag).png", .loadouts, AnyView(
-                LoadoutsView(loadouts: store.loadouts)
+                LoadoutsView(loadouts: store.loadouts, cameraManager: camera)
                     .environment(\.snapshotMode, true)
             )),
             ("camera_hub_\(tag).png", .camera, AnyView(
@@ -47,6 +47,20 @@ public enum SnapshotRenderer {
             let view = makeFramedWindow(tab: tab, store: store, camera: camera) { detail }
             renderHosting(view, to: outputDir.appendingPathComponent(filename), size: canvasSize)
         }
+    }
+
+    private static func snapshotOutputDirectory() -> URL {
+        let arguments = ProcessInfo.processInfo.arguments
+        if let flagIndex = arguments.firstIndex(of: "--snapshot-output"),
+           arguments.indices.contains(flagIndex + 1) {
+            return URL(fileURLWithPath: arguments[flagIndex + 1], isDirectory: true)
+        }
+
+        return FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0]
+        .appendingPathComponent("FujiRecipes/Snapshots", isDirectory: true)
     }
 
     private static func makeFramedWindow<Content: View>(

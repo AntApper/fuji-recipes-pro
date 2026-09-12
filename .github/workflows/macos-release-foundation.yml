@@ -1,0 +1,59 @@
+name: macOS release foundation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: Core tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run FujiRecipesCore tests
+        run: swift test --package-path FujiRecipesCore
+
+  ptp:
+    name: PTP build and tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PTP test dependency
+        run: brew install libgphoto2
+      - name: Build portable PTP targets
+        run: |
+          swift build --package-path FujiPTPClient --target PTPClient
+          swift build --package-path FujiPTPClient --target X100VIHelper
+      - name: Run X100VI helper request tests
+        run: swift test --package-path FujiPTPClient --filter X100VIHelperTests
+
+  macos-project:
+    name: macOS project validation
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate workspace and project metadata
+        run: |
+          xcodebuild -list -workspace FujiRecipes.xcworkspace
+          plutil -lint FujiRecipesMac/macos/Source/Info.plist
+      - name: Build Debug application without signing
+        run: >
+          xcodebuild -workspace FujiRecipes.xcworkspace
+          -scheme FujiRecipesMac
+          -configuration Debug
+          -sdk macosx
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+  release-inputs:
+    name: Helper resource provenance
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify helper resource and runtime provenance
+        run: scripts/verify-macos-release-foundation.sh

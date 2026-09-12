@@ -4,8 +4,8 @@
  * Uses libusb to send PTP containers via bulk transfer.
  * Communicates via line-delimited JSON over stdin/stdout.
  *
- * Build:
- *   gcc -o x100vi_helper x100vi_helper.c -I/opt/homebrew/include -L/opt/homebrew/lib -lusb-1.0
+ * Build the packaged macOS helper/runtime:
+ *   ../scripts/build-macos-helper.sh --architectures arm64
  *
  * Run:
  *   echo '{"id":"1","command":"ping"}' | ./x100vi_helper
@@ -489,63 +489,175 @@ static int send_two_phase_combined(libusb_device_handle *dev, uint16_t code,
 /* static int send_object_info(...) { ... } */
 /* static int send_object_data(...) { ... } */
 
-static int ptp_recv(libusb_device_handle *dev, uint8_t *resp, int maxlen, int *outlen) {
-    /* Read first chunk to get the container length from header */
-    int total = 0;
-    int transferred = 0;
-    int rc = libusb_bulk_transfer(dev, 0x81, resp, maxlen, &transferred, 5000);
-    if (rc != LIBUSB_SUCCESS) return rc;
-    total = transferred;
+#define PTP_HEADER_LENGTH 12u
+#define PTP_MAX_CONTAINER_LENGTH (256u * 1024u * 1024u)
 
-    if (total < 4) {
-        *outlen = total;
-        return LIBUSB_SUCCESS;
-    }
+enum {
+    PTP_FRAME_INVALID_LENGTH = -1000,
+    PTP_FRAME_INVALID_TYPE = -1001,
+    PTP_FRAME_INVALID_CODE = -1002,
+    PTP_FRAME_INVALID_TRANSACTION = -1003,
+    PTP_FRAME_SHORT_READ = -1004,
+    PTP_FRAME_ALLOCATION_FAILED = -1005,
+};
 
-    /* Parse container length from header */
-    uint32_t containerLen = resp[0] | (resp[1] << 8) | (resp[2] << 16) | (resp[3] << 24);
+typedef int (*PtpReadFunction)(void *context, uint8_t *buffer, size_t length,
+                               size_t *transferred);
 
-    /* Read remaining bytes if needed (for large responses) */
-    while (total < (int)containerLen && total < maxlen) {
-        transferred = 0;
-        rc = libusb_bulk_transfer(dev, 0x81, resp + total, maxlen - total, &transferred, 5000);
+typedef struct {
+    uint32_t length;
+    uint16_t type;
+    uint16_t code;
+    uint32_t transactionId;
+    uint8_t *payload;
+    uint32_t payloadLength;
+} PtpContainer;
+
+static uint16_t get_u16_le(const uint8_t *buf) {
+    return (uint16_t)(buf[0] | ((uint16_t)buf[1] << 8));
+}
+
+static uint32_t get_u32_le(const uint8_t *buf) {
+    return (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) |
+           ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
+}
+
+static void ptp_container_free(PtpContainer *container) {
+    free(container->payload);
+    memset(container, 0, sizeof(*container));
+}
+
+static int ptp_libusb_read(void *context, uint8_t *buffer, size_t length,
+                           size_t *transferred) {
+    int actual = 0;
+    int rc = libusb_bulk_transfer((libusb_device_handle *)context, 0x81, buffer,
+                                  (int)length, &actual, 10000);
+    *transferred = actual > 0 ? (size_t)actual : 0;
+    return rc;
+}
+
+/* Read exactly one PTP container: header first, then exactly its payload.
+ * Limiting every transfer to the remaining framed bytes prevents a DATA read
+ * from consuming the following RESPONSE container. */
+static int ptp_read_container_with(PtpReadFunction readFunction, void *context,
+                                   PtpContainer *container) {
+    uint8_t header[PTP_HEADER_LENGTH];
+    size_t offset = 0;
+    memset(container, 0, sizeof(*container));
+
+    while (offset < sizeof(header)) {
+        size_t transferred = 0;
+        int rc = readFunction(context, header + offset, sizeof(header) - offset,
+                              &transferred);
         if (rc != LIBUSB_SUCCESS) return rc;
-        total += transferred;
+        if (transferred == 0) return PTP_FRAME_SHORT_READ;
+        offset += transferred;
     }
 
-    *outlen = total;
+    container->length = get_u32_le(header);
+    container->type = get_u16_le(header + 4);
+    container->code = get_u16_le(header + 6);
+    container->transactionId = get_u32_le(header + 8);
+    if (container->length < PTP_HEADER_LENGTH ||
+        container->length > PTP_MAX_CONTAINER_LENGTH) {
+        return PTP_FRAME_INVALID_LENGTH;
+    }
+
+    container->payloadLength = container->length - PTP_HEADER_LENGTH;
+    if (container->payloadLength == 0) return LIBUSB_SUCCESS;
+    container->payload = malloc(container->payloadLength);
+    if (!container->payload) return PTP_FRAME_ALLOCATION_FAILED;
+
+    offset = 0;
+    while (offset < container->payloadLength) {
+        size_t transferred = 0;
+        int rc = readFunction(context, container->payload + offset,
+                              container->payloadLength - offset, &transferred);
+        if (rc != LIBUSB_SUCCESS) {
+            ptp_container_free(container);
+            return rc;
+        }
+        if (transferred == 0) {
+            ptp_container_free(container);
+            return PTP_FRAME_SHORT_READ;
+        }
+        offset += transferred;
+    }
     return LIBUSB_SUCCESS;
 }
 
-/* Receive complete PTP response (handles DATA+RESPONSE sequence) */
-static int ptp_recv_full(libusb_device_handle *dev, uint8_t *resp, int maxlen, int *outlen) {
-    int total = 0;
-    int phase = 0;  /* 0=first container, 1=second container */
-    
-    while (total < maxlen) {
-        int transferred = 0;
-        int rc = libusb_bulk_transfer(dev, 0x81, resp + total, maxlen - total, &transferred, 10000);
-        if (rc != LIBUSB_SUCCESS) return rc;
-        total += transferred;
-        
-        /* Check if we have a complete container */
-        if (total >= 12) {
-            uint32_t containerLen = resp[0] | (resp[1] << 8) | (resp[2] << 16) | (resp[3] << 24);
-            if (total >= containerLen) {
-                phase++;
-                if (phase >= 2) break;  /* Got both containers */
-                /* Shift remaining data to beginning */
-                int remaining = total - containerLen;
-                if (remaining > 0) {
-                    memmove(resp, resp + containerLen, remaining);
-                    total = remaining;
-                } else {
-                    total = 0;
-                }
-            }
-        }
+static int ptp_read_container(libusb_device_handle *dev, PtpContainer *container) {
+    return ptp_read_container_with(ptp_libusb_read, dev, container);
+}
+
+static int ptp_validate_container(const PtpContainer *container,
+                                  uint16_t expectedType, uint16_t expectedCode,
+                                  uint32_t expectedTransactionId) {
+    if (container->type != expectedType) return PTP_FRAME_INVALID_TYPE;
+    if (container->code != expectedCode) return PTP_FRAME_INVALID_CODE;
+    if (container->transactionId != expectedTransactionId) {
+        return PTP_FRAME_INVALID_TRANSACTION;
     }
-    *outlen = total;
+    return LIBUSB_SUCCESS;
+}
+
+static int ptp_parse_object_handles(const PtpContainer *data,
+                                    const uint8_t **handles,
+                                    uint32_t *handleCount) {
+    if (data->payloadLength < 4) return PTP_FRAME_INVALID_LENGTH;
+    uint32_t count = get_u32_le(data->payload);
+    if (count > (data->payloadLength - 4) / 4) return PTP_FRAME_INVALID_LENGTH;
+    *handles = data->payload + 4;
+    *handleCount = count;
+    return LIBUSB_SUCCESS;
+}
+
+static int ptp_read_data_and_ok_response(libusb_device_handle *dev,
+                                         uint16_t operationCode,
+                                         uint32_t transactionId,
+                                         PtpContainer *data) {
+    int rc = ptp_read_container(dev, data);
+    if (rc != LIBUSB_SUCCESS) return rc;
+    rc = ptp_validate_container(data, 0x0002, operationCode, transactionId);
+    if (rc != LIBUSB_SUCCESS) {
+        ptp_container_free(data);
+        return rc;
+    }
+
+    PtpContainer response;
+    rc = ptp_read_container(dev, &response);
+    if (rc != LIBUSB_SUCCESS) {
+        ptp_container_free(data);
+        return rc;
+    }
+    rc = ptp_validate_container(&response, 0x0003, 0x2001, transactionId);
+    ptp_container_free(&response);
+    if (rc != LIBUSB_SUCCESS) {
+        ptp_container_free(data);
+        return rc;
+    }
+    return LIBUSB_SUCCESS;
+}
+
+/* Compatibility wrapper for existing small control paths.  Unlike the old
+ * implementation, it never treats an incomplete USB transfer as a container. */
+static int ptp_recv(libusb_device_handle *dev, uint8_t *resp, int maxlen, int *outlen) {
+    PtpContainer container;
+    int rc = ptp_read_container(dev, &container);
+    if (rc != LIBUSB_SUCCESS) return rc;
+    if (container.length > (uint32_t)maxlen) {
+        ptp_container_free(&container);
+        return PTP_FRAME_INVALID_LENGTH;
+    }
+    put_u32_le(resp, container.length);
+    put_u16_le(resp + 4, container.type);
+    put_u16_le(resp + 6, container.code);
+    put_u32_le(resp + 8, container.transactionId);
+    if (container.payloadLength > 0) {
+        memcpy(resp + PTP_HEADER_LENGTH, container.payload, container.payloadLength);
+    }
+    *outlen = (int)container.length;
+    ptp_container_free(&container);
     return LIBUSB_SUCCESS;
 }
 
@@ -615,75 +727,26 @@ static int read_large_prop(libusb_device_handle *dev, uint16_t prop, const char 
     /* Send GetDevicePropValue */
     int rc = ptp_send(dev, 0x1015, 1, params);
     if (rc != LIBUSB_SUCCESS) return rc;
-
-    /* Receive DATA container - read first chunk to get length */
-    uint8_t header[64];
-    int len = 0;
-    rc = ptp_recv(dev, header, sizeof(header), &len);
-    if (rc != LIBUSB_SUCCESS || len < 12) return -2;
-
-    uint16_t dataType = header[4] | (header[5] << 8);
-    if (dataType != 0x0002) return -3;  /* Expected DATA */
-
-    uint32_t containerLen = header[0] | (header[1] << 8) | (header[2] << 16) | (header[3] << 24);
-    uint32_t dataLen = containerLen - 12;  /* data after 12-byte header */
-    fprintf(stderr, "[LARGE_PROP] DATA container: total=%u payload=%u\n", containerLen, dataLen);
-
-    /* Allocate buffer for full DATA container */
-    uint8_t *dataBuf = (uint8_t *)malloc(containerLen);
-    if (!dataBuf) return -99;
-    memcpy(dataBuf, header, len);
-
-    /* Read remaining data if needed */
-    while (len < (int)containerLen) {
-        uint8_t *newBuf = (uint8_t *)realloc(dataBuf, containerLen);
-        if (!newBuf) { free(dataBuf); return -99; }
-        dataBuf = newBuf;
-        int chunkLen = 0;
-        rc = ptp_recv(dev, dataBuf + len, (int)(containerLen - len), &chunkLen);
-        if (rc != LIBUSB_SUCCESS) { free(dataBuf); return rc; }
-        len += chunkLen;
-    }
-
-    /* Receive RESPONSE container */
-    uint8_t resp[32];
-    int respLen = 0;
-    rc = ptp_recv(dev, resp, sizeof(resp), &respLen);
-    free(dataBuf);  /* We'll re-read the data below */
-    if (rc != LIBUSB_SUCCESS || respLen < 12) return -4;
-
-    uint16_t respCode = resp[6] | (resp[7] << 8);
-    if (respCode != 0x2001) {
-        fprintf(stderr, "[LARGE_PROP] Response 0x%04X\n", respCode);
-        /* Return distinct code for DeviceBusy so caller can retry */
-        if (respCode == 0x2019) return -201;  /* DeviceBusy — camera still processing */
-        return -6;
-    }
-
-    fprintf(stderr, "[LARGE_PROP] Property 0x%04X: %u bytes → %s\n", prop, dataLen, filePath);
-
-    /* Re-read the property data for file write (simpler than keeping buffer) */
-    /* Actually, we already freed it. Let us redo this properly. */
-    /* Send GetDevicePropValue again */
-    rc = ptp_send(dev, 0x1015, 1, params);
+    uint32_t transactionId = g_transactionId;
+    PtpContainer data;
+    rc = ptp_read_data_and_ok_response(dev, 0x1015, transactionId, &data);
     if (rc != LIBUSB_SUCCESS) return rc;
 
-    /* Receive DATA container fully */
-    dataBuf = (uint8_t *)malloc(containerLen);
-    if (!dataBuf) return -99;
-    len = 0;
-    rc = ptp_recv(dev, dataBuf, (int)containerLen, &len);
-    if (rc != LIBUSB_SUCCESS) { free(dataBuf); return rc; }
-
-    /* Write payload (skip 12-byte header) to file */
+    fprintf(stderr, "[LARGE_PROP] Property 0x%04X: %u bytes → %s\n",
+            prop, data.payloadLength, filePath);
     FILE *f = fopen(filePath, "wb");
-    if (!f) { free(dataBuf); return -98; }
-    fwrite(dataBuf + 12, 1, dataLen, f);
+    if (!f) {
+        ptp_container_free(&data);
+        return -98;
+    }
+    size_t written = fwrite(data.payload, 1, data.payloadLength, f);
     fclose(f);
-    free(dataBuf);
-
-    /* Receive and discard RESPONSE */
-    ptp_recv(dev, resp, sizeof(resp), &respLen);
+    if (written != data.payloadLength) {
+        ptp_container_free(&data);
+        return -98;
+    }
+    uint32_t dataLen = data.payloadLength;
+    ptp_container_free(&data);
 
     fprintf(stderr, "[LARGE_PROP] Written %u bytes to %s\n", dataLen, filePath);
     return 0;
@@ -781,9 +844,6 @@ static int trigger_conversion(libusb_device_handle *dev) {
 
 /* Poll for converted JPEG, download to file, delete temp object */
 static int wait_for_result(libusb_device_handle *dev, const char *outPath, int timeoutMs) {
-    uint8_t resp[256];
-    int len = 0;
-    int startMs = 0;  /* We'll track with usleep */
     int pollCount = 0;
 
     fprintf(stderr, "[RESULT] Polling for conversion result (timeout=%dms)...\n", timeoutMs);
@@ -797,39 +857,26 @@ static int wait_for_result(libusb_device_handle *dev, const char *outPath, int t
             return rc;
         }
 
-        /* Receive DATA */
-        len = 0;
-        rc = ptp_recv(dev, resp, sizeof(resp), &len);
-        if (rc != LIBUSB_SUCCESS || len < 12) {
-            fprintf(stderr, "[RESULT] GetObjectHandles DATA failed: rc=%d\n", rc);
-            return rc;
-        }
-        uint16_t dataType = resp[4] | (resp[5] << 8);
-        if (dataType != 0x0002) {
-            fprintf(stderr, "[RESULT] Expected DATA, got 0x%04X\n", dataType);
-            return -3;
-        }
-
-        /* Receive RESPONSE */
-        len = 0;
-        rc = ptp_recv(dev, resp, sizeof(resp), &len);
-        if (rc != LIBUSB_SUCCESS || len < 12) {
-            fprintf(stderr, "[RESULT] GetObjectHandles RESP failed: rc=%d\n", rc);
+        PtpContainer handlesData;
+        rc = ptp_read_data_and_ok_response(dev, 0x1007, g_transactionId, &handlesData);
+        if (rc != LIBUSB_SUCCESS) {
+            fprintf(stderr, "[RESULT] GetObjectHandles response failed: rc=%d\n", rc);
             return rc;
         }
 
-        /* Parse handle count from DATA payload */
+        /* The DATA container remains owned here until handles are parsed; do
+         * not overwrite it while receiving the following RESPONSE. */
+        const uint8_t *handles = NULL;
         uint32_t numHandles = 0;
-        if (len >= 16) {
-            numHandles = resp[12] | (resp[13] << 8) | (resp[14] << 16) | (resp[15] << 24);
+        rc = ptp_parse_object_handles(&handlesData, &handles, &numHandles);
+        if (rc != LIBUSB_SUCCESS) {
+            ptp_container_free(&handlesData);
+            return rc;
         }
 
         if (numHandles > 0) {
-            /* Extract first handle */
-            uint32_t handle = 0;
-            if (len >= 20) {
-                handle = resp[16] | (resp[17] << 8) | (resp[18] << 16) | (resp[19] << 24);
-            }
+            uint32_t handle = get_u32_le(handles);
+            ptp_container_free(&handlesData);
             fprintf(stderr, "[RESULT] Conversion complete! handle=0x%08X\n", handle);
 
             /* Download JPEG via GetObject */
@@ -840,57 +887,46 @@ static int wait_for_result(libusb_device_handle *dev, const char *outPath, int t
                 return rc;
             }
 
-            /* Receive DATA container header */
-            uint8_t jpegHeader[64];
-            int jpegLen = 0;
-            rc = ptp_recv(dev, jpegHeader, sizeof(jpegHeader), &jpegLen);
-            if (rc != LIBUSB_SUCCESS || jpegLen < 12) {
-                fprintf(stderr, "[RESULT] GetObject DATA header failed: rc=%d\n", rc);
+            PtpContainer jpegData;
+            rc = ptp_read_data_and_ok_response(dev, 0x1009, g_transactionId, &jpegData);
+            if (rc != LIBUSB_SUCCESS) {
+                fprintf(stderr, "[RESULT] GetObject response failed: rc=%d\n", rc);
                 return rc;
             }
-
-            uint32_t jpegTotalLen = jpegHeader[0] | (jpegHeader[1] << 8) |
-                                     (jpegHeader[2] << 16) | (jpegHeader[3] << 24);
-            uint32_t jpegDataLen = jpegTotalLen - 12;
+            uint32_t jpegDataLen = jpegData.payloadLength;
             fprintf(stderr, "[RESULT] JPEG size: %u bytes (%.1f MB)\n",
                     jpegDataLen, jpegDataLen / 1024.0 / 1024.0);
 
-            /* Read full JPEG data */
-            uint8_t *jpegData = (uint8_t *)malloc(jpegTotalLen);
-            if (!jpegData) return -99;
-            memcpy(jpegData, jpegHeader, jpegLen);
-            int totalRecv = jpegLen;
-            while (totalRecv < (int)jpegTotalLen) {
-                uint8_t *newBuf = (uint8_t *)realloc(jpegData, jpegTotalLen);
-                if (!newBuf) { free(jpegData); return -99; }
-                jpegData = newBuf;
-                int chunkLen = 0;
-                rc = ptp_recv(dev, jpegData + totalRecv, (int)(jpegTotalLen - totalRecv), &chunkLen);
-                if (rc != LIBUSB_SUCCESS) { free(jpegData); return rc; }
-                totalRecv += chunkLen;
-            }
-
             /* Write JPEG to file */
             FILE *f = fopen(outPath, "wb");
-            if (!f) { free(jpegData); return -98; }
-            fwrite(jpegData + 12, 1, jpegDataLen, f);
+            if (!f) {
+                ptp_container_free(&jpegData);
+                return -98;
+            }
+            size_t written = fwrite(jpegData.payload, 1, jpegDataLen, f);
             fclose(f);
-            free(jpegData);
-
-            /* Receive and discard RESPONSE */
-            ptp_recv(dev, resp, sizeof(resp), &len);
+            ptp_container_free(&jpegData);
+            if (written != jpegDataLen) return -98;
 
             /* Delete temp object */
             fprintf(stderr, "[RESULT] Cleaning up temp object...\n");
             uint32_t delParam[] = {handle};
             rc = ptp_send(dev, 0x100B, 1, delParam);
             if (rc == LIBUSB_SUCCESS) {
-                ptp_recv(dev, resp, sizeof(resp), &len);  /* discard response */
+                PtpContainer deleteResponse;
+                rc = ptp_read_container(dev, &deleteResponse);
+                if (rc == LIBUSB_SUCCESS) {
+                    rc = ptp_validate_container(&deleteResponse, 0x0003, 0x2001,
+                                                g_transactionId);
+                    ptp_container_free(&deleteResponse);
+                }
+                if (rc != LIBUSB_SUCCESS) return rc;
             }
 
             fprintf(stderr, "[RESULT] JPEG saved to %s\n", outPath);
             return (int)jpegDataLen;
         }
+        ptp_container_free(&handlesData);
 
         /* No result yet, wait 1 second and poll again */
         pollCount++;
@@ -1392,6 +1428,7 @@ static void print_preset_write_result(const char *id, int slot, int slotSelectRc
 
 /* ── Main Loop ───────────────────────────────────────────────────────── */
 
+#ifndef PTP_FRAME_FIXTURE_TEST
 int main(int argc, char *argv[]) {
     libusb_context *ctx = NULL;
     libusb_device_handle *dev = NULL;
@@ -2298,3 +2335,4 @@ int main(int argc, char *argv[]) {
     libusb_exit(ctx);
     return 0;
 }
+#endif

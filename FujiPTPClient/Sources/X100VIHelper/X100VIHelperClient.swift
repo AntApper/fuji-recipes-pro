@@ -25,6 +25,7 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
     private var terminationSummary: String?
     private var isConnectedFlag = false
     private var transactionID = 0
+    private var pendingRequests: [String: PendingRequest] = [:]
     private var _cameraInfo: PTPCameraInfo = PTPCameraInfo(model: "Not connected")
 
     // All mutable state is touched only inside the serial `queue`.  The public
@@ -82,6 +83,9 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
             client.queue.async {
                 guard client.process === terminatedProcess else { return }
                 client.terminationSummary = reason
+                client.failAllPendingLocked(
+                    PTPError.notConnected
+                )
             }
         }
 
@@ -166,6 +170,7 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
     public func disconnect() {
         queue.sync {
             isConnectedFlag = false
+            failAllPendingLocked(PTPError.notConnected)
             requestStreamContinuation?.finish()
             requestStreamContinuation = nil
             requestProcessorTask?.cancel()
@@ -421,7 +426,7 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         }
     }
 
-    public func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)?) async throws -> JPEGFile? {
+    public func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)?) async -> RAFConversionOutcome {
         // Profile modification is unsupported because the camera-verified
         // pipeline builds a default profile from scratch for X100VI.
         _ = profileModifier
@@ -430,38 +435,62 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         let rafPath = tempDir.appendingPathComponent("input.RAF").path
         let jpegPath = tempDir.appendingPathComponent("output.jpg").path
 
-        try raf.data.write(to: URL(fileURLWithPath: rafPath))
+        do {
+            try raf.data.write(to: URL(fileURLWithPath: rafPath))
+        } catch {
+            return .failed(message: "Could not stage RAF input: \(error.localizedDescription)")
+        }
 
         defer {
             try? FileManager.default.removeItem(atPath: rafPath)
             try? FileManager.default.removeItem(atPath: jpegPath)
         }
 
-        let response = try await sendCommand("convert_raf", params: [
-            "input": rafPath,
-            "output": jpegPath
-        ])
+        let response: [String: Any]
+        do {
+            response = try await sendCommand("convert_raf", params: [
+                "input": rafPath,
+                "output": jpegPath
+            ], phase: .conversionPipeline)
+        } catch is CancellationError {
+            return .cancelled
+        } catch {
+            return .failed(message: error.localizedDescription)
+        }
 
+        let result = response["result"] as? [String: Any]
         guard response["success"] as? Bool == true,
-              let result = response["result"] as? [String: Any],
+              let result,
               let status = result["status"] as? String,
               status == "conversion_complete",
               let size = result["size"] as? Int,
               size > 0 else {
-            let error = (response["result"] as? [String: Any])?["error"] as? String
+            let reason = result?["error"] as? String
                 ?? response["error"] as? String
                 ?? "unknown"
-            throw PTPError.platformError("Conversion failed: \(error)")
+            // The framed helper only emits these after the camera accepted the
+            // trigger. Its macOS libusb transport cannot always retrieve the
+            // generated object, so this is not a conversion failure claim.
+            if reason == "timeout" || reason == "download_failed" {
+                return .triggerAcceptedOutputNotRetrievable(reason: reason)
+            }
+            return .failed(message: "Conversion failed: \(reason)")
         }
 
-        let jpegData = try Data(contentsOf: URL(fileURLWithPath: jpegPath))
-        return JPEGFile(
+        do {
+            let jpegData = try Data(contentsOf: URL(fileURLWithPath: jpegPath))
+            return .downloadedJPEG(JPEGFile(
             name: "converted_\(raf.name)",
             data: jpegData,
             size: UInt32(size),
             storageID: 0,
             objectHandle: 0
-        )
+            ))
+        } catch {
+            return .triggerAcceptedOutputNotRetrievable(
+                reason: "Helper reported a JPEG but macOS could not read it: \(error.localizedDescription)"
+            )
+        }
     }
 
     public func reconnect() async throws {
@@ -536,10 +565,89 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
 
     // MARK: - Command Communication
 
-    private struct PendingRequest: Sendable {
+    private final class PendingRequest: @unchecked Sendable {
+        let id: String
         let command: String
         let params: [String: any Sendable]
-        let continuation: CheckedContinuation<ResponseBox, any Error>
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<ResponseBox, any Error>?
+        private(set) var cancelled = false
+
+        init(id: String, command: String, params: [String: any Sendable]) {
+            self.id = id
+            self.command = command
+            self.params = params
+        }
+
+        func install(_ continuation: CheckedContinuation<ResponseBox, any Error>) {
+            lock.lock()
+            defer { lock.unlock() }
+            if cancelled {
+                continuation.resume(throwing: CancellationError())
+            } else {
+                self.continuation = continuation
+            }
+        }
+
+        func succeed(_ response: ResponseBox) {
+            finish(.success(response))
+        }
+
+        func fail(_ error: Error) {
+            finish(.failure(error))
+        }
+
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            let continuation = self.continuation
+            self.continuation = nil
+            lock.unlock()
+            continuation?.resume(throwing: CancellationError())
+        }
+
+        var isCancelled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return cancelled
+        }
+
+        private func finish(_ result: Result<ResponseBox, Error>) {
+            lock.lock()
+            let continuation = self.continuation
+            self.continuation = nil
+            lock.unlock()
+            guard let continuation else { return }
+            continuation.resume(with: result)
+        }
+    }
+
+    private enum HelperRequestPhase {
+        case handshake
+        case property
+        case preset
+        case transfer
+        case conversionPipeline
+
+        var timeout: TimeInterval {
+            switch self {
+            case .handshake: 10
+            case .property: 15
+            case .preset: 30
+            case .transfer: 90
+            case .conversionPipeline: 90
+            }
+        }
+
+        static func forCommand(_ command: String) -> Self {
+            switch command {
+            case "ping", "connect", "reconnect": .handshake
+            case "read_preset_slot", "write_preset_slot": .preset
+            case "load_raf", "get_profile", "set_profile", "wait_result": .transfer
+            case "convert_raf": .conversionPipeline
+            default: .property
+            }
+        }
     }
 
     /// The exact JSON field names accepted by `x100vi_helper` for a raw C-slot
@@ -590,23 +698,38 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
     }
 
     /// Serialise a command to the helper and return its parsed JSON response.
-    /// The timeout applies to the end-to-end request/response cycle.
+    /// Each request carries a unique protocol ID; cancellation removes its
+    /// continuation while the serial worker consumes its eventual response so
+    /// it cannot be mistaken for the following request.
     @discardableResult
-    private func sendCommand(_ command: String, params: [String: any Sendable], timeout: TimeInterval = 30) async throws -> [String: Any] {
-        let box = try await withTimeout(timeout: timeout) {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ResponseBox, any Error>) in
-                self.queue.sync {
-                    guard let requestStreamContinuation = self.requestStreamContinuation else {
-                        continuation.resume(throwing: PTPError.notConnected)
-                        return
+    private func sendCommand(
+        _ command: String,
+        params: [String: any Sendable],
+        phase: HelperRequestPhase? = nil
+    ) async throws -> [String: Any] {
+        let id = queue.sync {
+            let current = transactionID
+            transactionID += 1
+            return String(current)
+        }
+        let request = PendingRequest(id: id, command: command, params: params)
+        let selectedPhase = phase ?? .forCommand(command)
+        let box = try await withTimeout(timeout: selectedPhase.timeout) {
+            try await withTaskCancellationHandler(operation: {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ResponseBox, any Error>) in
+                    request.install(continuation)
+                    self.queue.sync {
+                        guard let requestStreamContinuation = self.requestStreamContinuation else {
+                            request.fail(PTPError.notConnected)
+                            return
+                        }
+                        self.pendingRequests[id] = request
+                        requestStreamContinuation.yield(request)
                     }
-                    requestStreamContinuation.yield(PendingRequest(
-                        command: command,
-                        params: params,
-                        continuation: continuation
-                    ))
                 }
-            }
+            }, onCancel: {
+                self.cancelPendingRequest(request)
+            })
         }
         return box.dict
     }
@@ -623,6 +746,11 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
     /// one request at a time.  This guarantees request/response ordering.
     private func processRequests(from stream: AsyncStream<PendingRequest>) async {
         for await request in stream {
+            // A request can time out while waiting behind a long transfer.
+            // Do not write cancelled queued work to the camera.
+            if request.isCancelled {
+                continue
+            }
             do {
                 var (iterator, inputPipe, process) = self.queue.sync { () -> (AsyncThrowingStream<String, any Error>.Iterator, Pipe, Process) in
                     guard let iterator = self.lineIterator,
@@ -637,14 +765,8 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
                     throw PTPError.notConnected
                 }
 
-                let id = self.queue.sync {
-                    let current = self.transactionID
-                    self.transactionID += 1
-                    return current
-                }
-
                 guard let data = try? Self.helperRequestData(
-                    id: String(id),
+                    id: request.id,
                     command: request.command,
                     params: request.params
                 ),
@@ -667,11 +789,35 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
                       let json = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
                     throw PTPError.invalidResponse("Failed to parse JSON: \(responseLine)")
                 }
+                guard String(describing: json["id"] ?? "") == request.id else {
+                    throw PTPError.invalidResponse(
+                        "Helper response ID \(String(describing: json["id"] ?? "missing")) did not match request \(request.id)"
+                    )
+                }
 
-                request.continuation.resume(returning: ResponseBox(json))
+                _ = self.queue.sync { self.pendingRequests.removeValue(forKey: request.id) }
+                request.succeed(ResponseBox(json))
             } catch {
-                request.continuation.resume(throwing: error)
+                _ = self.queue.sync { self.pendingRequests.removeValue(forKey: request.id) }
+                request.fail(error)
             }
+        }
+    }
+
+    private func cancelPendingRequest(_ request: PendingRequest) {
+        queue.async {
+            self.pendingRequests.removeValue(forKey: request.id)
+            request.cancel()
+        }
+    }
+
+    /// Called only while `queue` is held. Every queued or in-flight caller
+    /// must be released when the child exits or explicit disconnect begins.
+    private func failAllPendingLocked(_ error: Error) {
+        let requests = pendingRequests.values
+        pendingRequests.removeAll()
+        for request in requests {
+            request.fail(error)
         }
     }
 

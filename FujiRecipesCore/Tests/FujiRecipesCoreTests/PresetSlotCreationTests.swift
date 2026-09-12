@@ -74,6 +74,64 @@ final class PresetSlotCreationTests: XCTestCase {
         XCTAssertEqual(result.warnings, ["0xD19C: 0x201C"])
     }
 
+    func testRAFConversionOutcomeDoesNotTreatAcceptedTriggerAsJPEG() {
+        let accepted = RAFConversionOutcome.triggerAcceptedOutputNotRetrievable(reason: "timeout")
+        let failed = RAFConversionOutcome.failed(message: "upload rejected")
+        let jpeg = JPEGFile(name: "result.jpg", data: Data([0xFF]), size: 1, storageID: 0, objectHandle: 0)
+
+        XCTAssertNil(accepted.jpeg)
+        XCTAssertNil(failed.jpeg)
+        XCTAssertEqual(RAFConversionOutcome.downloadedJPEG(jpeg).jpeg?.data, Data([0xFF]))
+    }
+
+    @MainActor
+    func testCameraManagerRollsBackConfiguredSlotAfterPartialWriteFailure() async {
+        let baseline = PTPClientPresetData(slot: 3, name: "Previous", filmSimulation: 7)
+        let client = RecordingPTPClient(
+            preset: baseline,
+            writeErrors: [PTPError.writeFailed(0xD192, "readback mismatch"), nil]
+        )
+        let manager = CameraManager()
+        await manager.connect(using: client)
+        let recipe = Recipe(id: "replace", name: "Replacement", source: "test", sourceUrl: nil)
+
+        do {
+            _ = try await manager.importRecipeToCState(recipe, slot: 3)
+            XCTFail("Expected write failure")
+        } catch let error as PTPPresetSlotWriteRecoveryError {
+            XCTAssertEqual(error.baseline, .configured(baseline))
+            XCTAssertEqual(error.rollback, .restored)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(client.writtenPresets.count, 2)
+        XCTAssertEqual(client.writtenPresets.last, baseline)
+    }
+
+    @MainActor
+    func testCameraManagerNeverWritesRawZeroEmptySentinelAsRollback() async {
+        let client = RecordingPTPClient(
+            preset: PTPClientPresetData(slot: 3, isEmptySlot: true),
+            writeErrors: [PTPError.writeFailed(0xD192, "readback mismatch")]
+        )
+        let manager = CameraManager()
+        await manager.connect(using: client)
+        let recipe = Recipe(id: "replace", name: "Replacement", source: "test", sourceUrl: nil)
+
+        do {
+            _ = try await manager.importRecipeToCState(recipe, slot: 3)
+            XCTFail("Expected write failure")
+        } catch let error as PTPPresetSlotWriteRecoveryError {
+            XCTAssertEqual(error.baseline, .emptySentinel)
+            XCTAssertEqual(error.rollback, .notAttemptedEmptySentinel)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(client.writtenPresets.count, 1)
+    }
+
     @MainActor
     func testCameraManagerMapsHighISONoiseReductionToD1A1Field() async throws {
         let client = RecordingPTPClient()
@@ -150,6 +208,35 @@ final class PresetSlotCreationTests: XCTestCase {
 
         XCTAssertNil(client.writtenPreset)
     }
+
+    @MainActor
+    func testCameraManagerCanRetryAfterConnectionFailure() async {
+        let manager = CameraManager()
+        let failing = RecordingPTPClient(connectError: PTPError.connectionFailed("USB busy"))
+        await manager.connect(using: failing)
+
+        XCTAssertEqual(manager.status, .error)
+        XCTAssertNotNil(manager.lastError)
+        XCTAssertFalse(failing.isConnected)
+
+        let succeeding = RecordingPTPClient()
+        await manager.connect(using: succeeding)
+
+        XCTAssertEqual(manager.status, .connected)
+        XCTAssertNil(manager.lastError)
+    }
+
+    @MainActor
+    func testSlotRefreshReportsPartialFailuresWithoutFabricatingSlots() async {
+        let client = RecordingPTPClient(readFailures: [2, 6])
+        let manager = CameraManager()
+        await manager.connect(using: client)
+
+        let result = await manager.readCStatesWithStatus()
+
+        XCTAssertEqual(result.presets.map(\.slot), [1, 3, 4, 5, 7])
+        XCTAssertEqual(result.failures.map(\.slot), [2, 6])
+    }
 }
 
 private final class RecordingPTPClient: PTPClientProtocol, @unchecked Sendable {
@@ -157,21 +244,52 @@ private final class RecordingPTPClient: PTPClientProtocol, @unchecked Sendable {
     var cameraInfo = PTPCameraInfo(model: "Test Camera")
     var writtenPreset: PTPClientPresetData?
     var writtenSlot: Int?
+    var writtenPresets: [PTPClientPresetData] = []
+    let connectError: Error?
+    let readFailures: Set<Int>
+    let preset: PTPClientPresetData?
+    private var writeErrors: [Error?]
 
-    func connect() async throws { isConnected = true }
+    init(
+        connectError: Error? = nil,
+        readFailures: Set<Int> = [],
+        preset: PTPClientPresetData? = nil,
+        writeErrors: [Error?] = []
+    ) {
+        self.connectError = connectError
+        self.readFailures = readFailures
+        self.preset = preset
+        self.writeErrors = writeErrors
+    }
+
+    func connect() async throws {
+        if let connectError { throw connectError }
+        isConnected = true
+    }
     func disconnect() { isConnected = false }
     func readProperty(_ code: UInt16) async throws -> PTPPropertyResponse { .unsupported }
     func writeProperty(_ code: UInt16, value: Int32) async throws {}
     func readPresetSlot(_ index: Int) async throws -> PTPClientPresetData {
-        PTPClientPresetData(slot: index)
+        if readFailures.contains(index) {
+            throw PTPError.readFailed(0xD18C, "slot unavailable")
+        }
+        return preset ?? PTPClientPresetData(slot: index)
     }
     func writePresetSlot(_ index: Int, data: PTPClientPresetData) async throws -> PTPPresetSlotWriteResult {
         writtenSlot = index
         writtenPreset = data
+        writtenPresets.append(data)
+        if !writeErrors.isEmpty {
+            if let error = writeErrors.removeFirst() {
+                throw error
+            }
+        }
         return PTPPresetSlotWriteResult(slot: index)
     }
     func readNativeProfile() async throws -> Data { Data() }
     func writePTPSettings(from recipe: Recipe) async throws {}
-    func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)?) async throws -> JPEGFile? { nil }
+    func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)?) async -> RAFConversionOutcome {
+        .failed(message: "not implemented")
+    }
     func capturePreview() async throws -> JPEGFile? { nil }
 }

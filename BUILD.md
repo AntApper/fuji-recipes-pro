@@ -10,6 +10,36 @@
   ```
 - **Apple Developer Account** (for iOS signing)
 
+### macOS helper runtime
+
+The X100VI helper and its libusb runtime are rebuilt only through the
+provenance script:
+
+```bash
+# Requires a libusb dylib containing every requested architecture.
+scripts/build-macos-helper.sh
+
+# Local Apple Silicon development with the installed Homebrew libusb.
+scripts/build-macos-helper.sh --architectures arm64
+```
+
+The first command intentionally fails when the supplied `LIBUSB_DYLIB` (or
+Homebrew's libusb) does not contain both `arm64` and `x86_64`. It copies the
+matching runtime into the app resources, changes the helper load command to
+`@rpath/libusb-1.0.0.dylib`, adds `@loader_path`, and writes SHA-256 hashes to
+`x100vi_helper.provenance.json`. It also copies the libusb license text.
+
+For a release candidate, the runtime must additionally have a macOS deployment
+target no newer than the app's 14.0 target:
+
+```bash
+scripts/verify-macos-release-foundation.sh
+```
+
+Do not bypass this gate. The locally installed Homebrew libusb on a newer
+macOS may be arm64-only and built for a newer macOS version; in that case it
+is valid for local inspection only, not a distributable macOS artifact.
+
 ### Optional
 - **Physical X100VI** for camera testing
 - **iPad/iPhone + USB-C** for iOS PTP testing
@@ -25,10 +55,17 @@ bash tools/bundle-libgphoto2.sh
 
 This creates `FujiPTPClient/Resources/libgphoto2/` with 11 dylibs.
 
-### 2. Open Workspace
+### 2. Open the generated Xcode workspace
 
 ```bash
 open FujiRecipes.xcworkspace
+```
+
+`FujiRecipes.xcworkspace` is the authoritative Xcode entry point. Validate it
+after regeneration with:
+
+```bash
+xcodebuild -list -workspace FujiRecipes.xcworkspace
 ```
 
 ### 3. Set Signing
@@ -127,6 +164,22 @@ cd ../FujiPTPClient && xcodegen generate
 cd ../FujiRecipes/iOS && xcodegen generate
 cd ../FujiRecipesMac/macos && xcodegen generate
 ```
+
+## Credential-free release checks
+
+These checks intentionally do not sign, notarize, or contact a camera:
+
+```bash
+scripts/verify-macos-release-foundation.sh
+```
+
+The check validates helper source/resource hashes, the bundled libusb license,
+`@rpath`/`@loader_path` linkage, architecture coverage, and the minimum macOS
+version of both Mach-O files. A release build requires universal `arm64` and
+`x86_64` artifacts with a macOS 14.0-or-earlier runtime.
+
+See `docs/MACOS_RELEASE_BOUNDARIES.md` for the current Developer ID, App Store,
+notarization, and iOS boundaries.
 
 ## Troubleshooting
 

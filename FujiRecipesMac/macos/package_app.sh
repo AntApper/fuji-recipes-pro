@@ -12,6 +12,12 @@ APP_NAME="Fuji Recipes"
 BUNDLE_ID="com.ant.fuji-recipes-mac"
 ARCH_DIR=".build/arm64-apple-macosx/${CONFIG}"
 
+if [[ "$CONFIG" == "release" ]]; then
+  ../../scripts/verify-helper-resource.sh --require-universal --minimum-macos 14.0
+else
+  ../../scripts/verify-helper-resource.sh
+fi
+
 echo "▶ Building ($CONFIG)…"
 swift build -c "$CONFIG"
 
@@ -26,6 +32,15 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BIN" "$APP/Contents/MacOS/FujiRecipesMac"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+
+# The helper discovers its libusb runtime through @loader_path, so both must
+# remain adjacent in the application's top-level Resources directory.
+cp Resources/x100vi_helper "$APP/Contents/Resources/x100vi_helper"
+cp Resources/libusb-1.0.0.dylib "$APP/Contents/Resources/libusb-1.0.0.dylib"
+cp Resources/x100vi_helper.provenance.json "$APP/Contents/Resources/"
+mkdir -p "$APP/Contents/Resources/ThirdPartyNotices"
+cp Resources/ThirdPartyNotices/libusb-COPYING.txt \
+  "$APP/Contents/Resources/ThirdPartyNotices/libusb-COPYING.txt"
 
 # Copy the SwiftPM resource bundle so Bundle.module keeps working inside the .app.
 [ -d "$RES_BUNDLE" ] && cp -R "$RES_BUNDLE" "$APP/Contents/Resources/"
