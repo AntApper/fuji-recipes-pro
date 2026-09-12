@@ -27,7 +27,7 @@ public enum SnapshotRenderer {
         .preferredColorScheme(.dark)
         .frame(width: 1180, height: 780)
         
-        renderView(recipesView, to: outputDir.appendingPathComponent("recipes_view.png"), size: CGSize(width: 1180, height: 780))
+        renderHostingView(recipesView, to: outputDir.appendingPathComponent("recipes_view.png"), size: CGSize(width: 1180, height: 780))
         
         // 2. Loadouts Matrix View
         let loadoutsView = ZStack {
@@ -44,7 +44,7 @@ public enum SnapshotRenderer {
         .preferredColorScheme(.dark)
         .frame(width: 1180, height: 780)
         
-        renderView(loadoutsView, to: outputDir.appendingPathComponent("loadouts_view.png"), size: CGSize(width: 1180, height: 780))
+        renderHostingView(loadoutsView, to: outputDir.appendingPathComponent("loadouts_view.png"), size: CGSize(width: 1180, height: 780))
         
         // 3. Camera Hub View
         let cameraView = ZStack {
@@ -61,7 +61,7 @@ public enum SnapshotRenderer {
         .preferredColorScheme(.dark)
         .frame(width: 1180, height: 780)
         
-        renderView(cameraView, to: outputDir.appendingPathComponent("camera_hub_view.png"), size: CGSize(width: 1180, height: 780))
+        renderHostingView(cameraView, to: outputDir.appendingPathComponent("camera_hub_view.png"), size: CGSize(width: 1180, height: 780))
         
         // 4. RAF Darkroom View
         let darkroomView = ZStack {
@@ -78,19 +78,34 @@ public enum SnapshotRenderer {
         .preferredColorScheme(.dark)
         .frame(width: 1180, height: 780)
         
-        renderView(darkroomView, to: outputDir.appendingPathComponent("darkroom_view.png"), size: CGSize(width: 1180, height: 780))
+        renderHostingView(darkroomView, to: outputDir.appendingPathComponent("darkroom_view.png"), size: CGSize(width: 1180, height: 780))
     }
     
-    private static func renderView<V: View>(_ view: V, to url: URL, size: CGSize) {
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 2.0 // Retina 2x render
-        if let image = renderer.nsImage {
-            if let tiff = image.tiffRepresentation,
-               let rep = NSBitmapImageRep(data: tiff),
-               let png = rep.representation(using: .png, properties: [:]) {
-                try? png.write(to: url)
-                print("Rendered: \(url.lastPathComponent) (\(Int(size.width * 2))x\(Int(size.height * 2)))")
-            }
+    private static func renderHostingView<V: View>(_ view: V, to url: URL, size: CGSize) {
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame = NSRect(origin: .zero, size: size)
+        
+        // Create an offscreen window to guarantee layout, appearance, and subview hierarchy rendering
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = hostingView
+        window.layoutIfNeeded()
+        window.display()
+        
+        guard let rep = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) else {
+            print("Failed to allocate bitmap rep for \(url.lastPathComponent)")
+            return
+        }
+        hostingView.cacheDisplay(in: hostingView.bounds, to: rep)
+        
+        if let pngData = rep.representation(using: .png, properties: [:]) {
+            try? pngData.write(to: url)
+            print("Successfully rendered: \(url.lastPathComponent) (\(pngData.count) bytes)")
         }
     }
 }
