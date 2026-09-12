@@ -10,7 +10,7 @@ public struct LoadoutsView: View {
     @State private var selectedDialSlot: Int = 1
 
     private let columns = [
-        GridItem(.adaptive(minimum: 280, maximum: 480), spacing: 14)
+        GridItem(.adaptive(minimum: 270, maximum: 360), spacing: 14)
     ]
 
     public init(loadouts: LoadoutStore) {

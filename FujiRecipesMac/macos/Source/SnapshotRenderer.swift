@@ -12,55 +12,84 @@ public enum SnapshotRenderer {
         let outputDir = URL(fileURLWithPath: "/Users/ant/Documents/project/fuji-recipes-research/docs/screenshots")
         try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         
+        let canvasSize = CGSize(width: 1300, height: 860) // 1240 window + 60 padding for shadow
+        
         // 1. Recipes Studio View
-        let recipesWindow = makeWindow(tab: .recipes, store: store, camera: camera) {
+        let recipesWindow = makeFramedWindow(tab: .recipes, store: store, camera: camera) {
             RecipeListView(store: store)
         }
-        renderWindow(recipesWindow, to: outputDir.appendingPathComponent("recipes_studio_v1789232273.png"), size: CGSize(width: 1200, height: 780))
+        renderWindow(recipesWindow, to: outputDir.appendingPathComponent("recipes_studio_v1789233012.png"), size: canvasSize)
         
         // 2. Loadouts Matrix View
-        let loadoutsWindow = makeWindow(tab: .loadouts, store: store, camera: camera) {
+        let loadoutsWindow = makeFramedWindow(tab: .loadouts, store: store, camera: camera) {
             LoadoutsView(loadouts: store.loadouts)
         }
-        renderWindow(loadoutsWindow, to: outputDir.appendingPathComponent("custom_dial_matrix_v1789232273.png"), size: CGSize(width: 1200, height: 780))
+        renderWindow(loadoutsWindow, to: outputDir.appendingPathComponent("custom_dial_matrix_v1789233012.png"), size: canvasSize)
         
         // 3. Camera Hub View
-        let cameraWindow = makeWindow(tab: .camera, store: store, camera: camera) {
+        let cameraWindow = makeFramedWindow(tab: .camera, store: store, camera: camera) {
             CameraConnectionView(manager: camera, loadouts: store.loadouts)
         }
-        renderWindow(cameraWindow, to: outputDir.appendingPathComponent("camera_hub_v1789232273.png"), size: CGSize(width: 1200, height: 780))
+        renderWindow(cameraWindow, to: outputDir.appendingPathComponent("camera_hub_v1789233012.png"), size: canvasSize)
         
         // 4. RAF Darkroom View
-        let darkroomWindow = makeWindow(tab: .darkroom, store: store, camera: camera) {
+        let darkroomWindow = makeFramedWindow(tab: .darkroom, store: store, camera: camera) {
             RAFDarkroomView(manager: camera)
         }
-        renderWindow(darkroomWindow, to: outputDir.appendingPathComponent("darkroom_v1789232273.png"), size: CGSize(width: 1200, height: 780))
+        renderWindow(darkroomWindow, to: outputDir.appendingPathComponent("darkroom_v1789233012.png"), size: canvasSize)
     }
     
-    private static func makeWindow<Content: View>(
+    private static func makeFramedWindow<Content: View>(
         tab: AppTab,
         store: RecipeStore,
         camera: CameraManager,
         @ViewBuilder detail: () -> Content
     ) -> some View {
         ZStack {
-            GlassWindowBackground()
+            // Ambient Canvas Backdrop
+            Color(red: 0.04, green: 0.04, blue: 0.05).ignoresSafeArea()
             
-            HStack(spacing: 0) {
-                // Fixed-width crisp sidebar
-                SidebarStaticView(selection: tab, recipeStore: store, cameraManager: camera)
-                    .frame(width: 250)
+            // Floating macOS Window Container
+            ZStack(alignment: .topLeading) {
+                GlassWindowBackground()
                 
-                Rectangle()
-                    .fill(Theme.specularBorder)
-                    .frame(width: 1)
+                HStack(spacing: 0) {
+                    // Fixed-width crisp sidebar
+                    SidebarStaticView(selection: tab, recipeStore: store, cameraManager: camera)
+                        .frame(width: 240)
+                    
+                    Rectangle()
+                        .fill(Theme.specularBorder)
+                        .frame(width: 1)
+                    
+                    detail()
+                        .frame(width: 1000)
+                }
                 
-                detail()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // macOS Traffic Lights
+                HStack(spacing: 7) {
+                    Circle().fill(Color(red: 1.0, green: 0.36, blue: 0.34)).frame(width: 11, height: 11)
+                    Circle().fill(Color(red: 1.0, green: 0.74, blue: 0.18)).frame(width: 11, height: 11)
+                    Circle().fill(Color(red: 0.15, green: 0.79, blue: 0.25)).frame(width: 11, height: 11)
+                }
+                .padding(.leading, 14)
+                .padding(.top, 14)
             }
+            .frame(width: 1240, height: 800)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(LinearGradient(
+                        colors: [Color.white.opacity(0.22), Color.white.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.7), radius: 26, x: 0, y: 12)
+            .padding(30)
         }
         .preferredColorScheme(.dark)
-        .frame(width: 1200, height: 780)
+        .frame(width: 1300, height: 860)
         .tint(Theme.fujiAmber)
     }
     
@@ -70,7 +99,7 @@ public enum SnapshotRenderer {
         
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -100,7 +129,7 @@ private struct SidebarStaticView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Brand header
+            // Brand header with room for traffic lights
             HStack(spacing: 10) {
                 ZStack {
                     Circle()
@@ -111,28 +140,27 @@ private struct SidebarStaticView: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .frame(width: 30, height: 30)
+                        .frame(width: 28, height: 28)
                         .overlay(Circle().stroke(Theme.specularBorder, lineWidth: 1))
 
                     Circle()
                         .stroke(Theme.fujiRed, lineWidth: 1.5)
-                        .frame(width: 12, height: 12)
+                        .frame(width: 10, height: 10)
 
                     Image(systemName: "camera.aperture")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.titaniumMist)
                 }
-                .shadow(color: Color.black.opacity(0.4), radius: 6, y: 3)
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
                         Text("FUJIRECIPES")
-                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .font(.system(size: 11, weight: .black, design: .rounded))
                             .foregroundStyle(Theme.textPrimary)
                             .tracking(0.4)
 
                         Text("PRO")
-                            .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                            .font(.system(size: 7, weight: .heavy, design: .monospaced))
                             .foregroundStyle(Theme.fujiAmber)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -147,26 +175,26 @@ private struct SidebarStaticView: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 14)
-            .padding(.top, 16)
+            .padding(.top, 38) // Below traffic lights
             .padding(.bottom, 12)
 
             // Navigation items
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(spacing: 3) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(spacing: 2) {
                     ForEach(AppTab.allCases) { tab in
-                        HStack(spacing: 10) {
+                        HStack(spacing: 9) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
                                     .fill(selection == tab ? tab.accentColor : Color.white.opacity(0.04))
-                                    .frame(width: 26, height: 26)
+                                    .frame(width: 24, height: 24)
 
                                 Image(systemName: tab.icon)
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(selection == tab ? (tab.accentColor == Theme.fujiAmber ? Color.black : Color.white) : Theme.textSecondary)
                             }
 
                             Text(tab.title)
-                                .font(.subheadline.weight(selection == tab ? .semibold : .regular))
+                                .font(.system(size: 12, weight: selection == tab ? .semibold : .regular))
                                 .foregroundStyle(selection == tab ? Color.white : Theme.textSecondary)
 
                             Spacer(minLength: 0)
@@ -175,28 +203,28 @@ private struct SidebarStaticView: View {
                                 Text(badge)
                                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                                     .foregroundStyle(selection == tab ? Color.black : Theme.fujiAmber)
-                                    .padding(.horizontal, 6)
+                                    .padding(.horizontal, 5)
                                     .padding(.vertical, 2)
                                     .background(Capsule().fill(selection == tab ? Color.white : Theme.fujiAmber.opacity(0.18)))
                             }
                         }
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 5)
                         .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(selection == tab ? Color.white.opacity(0.12) : Color.clear)
                         )
                     }
                 }
 
                 // Film Sim shortcuts
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text("FILM SIMULATIONS")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
                         .foregroundStyle(Theme.textTertiary)
                         .padding(.horizontal, 10)
 
-                    VStack(spacing: 2) {
+                    VStack(spacing: 1) {
                         staticSimRow(title: "All Simulations", color: Theme.fujiAmber, count: 22)
                         staticSimRow(title: "Classic Chrome", color: Theme.filmSimColor(for: "Classic Chrome"))
                         staticSimRow(title: "Reala Ace", color: Theme.filmSimColor(for: "Reala Ace"))
@@ -207,14 +235,14 @@ private struct SidebarStaticView: View {
                 }
 
                 // Dial Bank Mini
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     HStack {
                         Text("CUSTOM DIAL BANK")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
                             .foregroundStyle(Theme.textTertiary)
                         Spacer()
                         Text("\(recipeStore.loadouts.loadoutCountWithSettings())/7")
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 8, weight: .semibold, design: .monospaced))
                             .foregroundStyle(Theme.fujiAmber)
                     }
                     .padding(.horizontal, 10)
@@ -228,13 +256,13 @@ private struct SidebarStaticView: View {
                                     .foregroundStyle(hasSetting ? Color.black : Theme.textTertiary)
                             }
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 3)
                             .background(
-                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
                                     .fill(hasSetting ? Theme.fujiAmber : Color.white.opacity(0.05))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
                                     .stroke(hasSetting ? Theme.fujiAmber.opacity(0.6) : Color.white.opacity(0.08), lineWidth: 0.8)
                             )
                         }
@@ -250,12 +278,12 @@ private struct SidebarStaticView: View {
             HStack(spacing: 8) {
                 Circle()
                     .fill(cameraManager.status.tint)
-                    .frame(width: 7, height: 7)
+                    .frame(width: 6, height: 6)
                     .shadow(color: cameraManager.status.tint.opacity(0.8), radius: 3)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(cameraManager.status.formattedLabel)
-                        .font(.caption2.weight(.semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
 
                     Text("X100VI USB RAW")
@@ -266,21 +294,21 @@ private struct SidebarStaticView: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(Theme.textTertiary)
-                    .padding(5)
+                    .padding(4)
                     .background(Circle().fill(Color.white.opacity(0.06)))
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.white.opacity(0.04))
                     .padding(.horizontal, 6)
                     .padding(.bottom, 6)
             )
         }
-        .frame(width: 250)
+        .frame(width: 240)
         .background(Theme.deepCharcoal.opacity(0.95))
     }
 
@@ -300,24 +328,24 @@ private struct SidebarStaticView: View {
     }
 
     private func staticSimRow(title: String, color: Color, count: Int? = nil) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             Circle()
                 .fill(color)
-                .frame(width: 6, height: 6)
+                .frame(width: 5, height: 5)
 
             Text(title)
-                .font(.caption)
+                .font(.system(size: 11))
                 .foregroundStyle(Theme.textSecondary)
 
             Spacer()
 
             if let count {
                 Text("\(count)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(Theme.textTertiary)
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.vertical, 3)
     }
 }
