@@ -43,7 +43,7 @@ struct FujiRecipesMacApp: App {
                         Group {
                             switch selectedTab {
                             case .recipes:
-                                RecipeListView(store: recipeStore)
+                                RecipeListView(store: recipeStore, cameraManager: cameraManager)
                             case .loadouts:
                                 LoadoutsView(loadouts: recipeStore.loadouts)
                             case .camera:

@@ -22,11 +22,19 @@ public func withTimeout<T: Sendable>(
             try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
             throw TimeoutError(timeout)
         }
-        defer { group.cancelAll() }
-        guard let result = try await group.next() else {
-            throw TimeoutError(timeout)
+        do {
+            guard let result = try await group.next() else {
+                group.cancelAll()
+                throw TimeoutError(timeout)
+            }
+            // Cancel the losing task before leaving the group.  The previous
+            // implementation drained it first, which meant a successful
+            // operation still waited for the timeout sleeper to fire.
+            group.cancelAll()
+            return result
+        } catch {
+            group.cancelAll()
+            throw error
         }
-        _ = try? await group.next() // drain the loser; ignore cancellation/timeout error
-        return result
     }
 }

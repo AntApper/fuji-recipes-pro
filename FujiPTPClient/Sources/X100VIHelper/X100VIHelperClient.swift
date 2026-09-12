@@ -16,9 +16,13 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
 
     private var process: Process?
     private var inputPipe: Pipe?
+    private var errorPipe: Pipe?
     private var lineIterator: AsyncThrowingStream<String, any Error>.Iterator?
     private var requestStreamContinuation: AsyncStream<PendingRequest>.Continuation?
     private var requestProcessorTask: Task<Void, Never>?
+    private var stderrReaderTask: Task<Void, Never>?
+    private var stderrTail = ""
+    private var terminationSummary: String?
     private var isConnectedFlag = false
     private var transactionID = 0
     private var _cameraInfo: PTPCameraInfo = PTPCameraInfo(model: "Not connected")
@@ -65,10 +69,21 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
 
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
 
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
-        process.standardError = FileHandle.standardError
+        process.standardError = stderrPipe
+        process.terminationHandler = { [weak self] terminatedProcess in
+            guard let client = self else { return }
+            let reason = terminatedProcess.terminationReason == .uncaughtSignal
+                ? "signal \(terminatedProcess.terminationStatus)"
+                : "exit \(terminatedProcess.terminationStatus)"
+            client.queue.async {
+                guard client.process === terminatedProcess else { return }
+                client.terminationSummary = reason
+            }
+        }
 
         try process.run()
 
@@ -87,13 +102,30 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
             }
         }
 
+        // The helper emits useful libusb/PTP diagnostics on stderr.  Drain it
+        // continuously (to avoid a full pipe stalling a long write) and retain
+        // only a small tail for an actionable error if the child terminates.
+        let stderrReader = Task { [weak self] in
+            do {
+                for try await rawLine in stderrPipe.fileHandleForReading.bytes.lines {
+                    self?.appendHelperStderr(String(rawLine))
+                }
+            } catch {
+                self?.appendHelperStderr("stderr reader failed: \(error.localizedDescription)")
+            }
+        }
+
         let (requestStream, requestContinuation) = AsyncStream<PendingRequest>.makeStream()
 
         self.queue.sync {
             self.process = process
             self.inputPipe = stdinPipe
+            self.errorPipe = stderrPipe
             self.lineIterator = lines.makeAsyncIterator()
             self.requestStreamContinuation = requestContinuation
+            self.stderrReaderTask = stderrReader
+            self.stderrTail = ""
+            self.terminationSummary = nil
             self.isConnectedFlag = true
         }
 
@@ -104,16 +136,31 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         }
         self.queue.sync { self.requestProcessorTask = processor }
 
-        // Verify the helper is alive.
-        let response = try await sendCommand("ping", params: [:])
-        guard response["success"] as? Bool == true else {
-            throw PTPError.connectionFailed("Helper responded with error")
-        }
+        do {
+            // First verify the JSON protocol, then claim the USB interface and
+            // open the PTP session. `ping` only proves that the child process
+            // started; it does not connect the camera.
+            let pingResponse = try await sendCommand("ping", params: [:])
+            guard pingResponse["success"] as? Bool == true else {
+                throw PTPError.connectionFailed("Helper did not respond to ping")
+            }
 
-        self.cameraInfo = PTPCameraInfo(
-            model: "Fuji X100VI",
-            vendorExtensionId: 0x0000000E
-        )
+            let connectionResponse = try await sendCommand("connect", params: [:])
+            guard connectionResponse["success"] as? Bool == true else {
+                let reason = connectionResponse["error"] as? String ?? "unknown error"
+                throw PTPError.connectionFailed("Unable to open X100VI: \(reason)")
+            }
+
+            self.cameraInfo = PTPCameraInfo(
+                model: "Fuji X100VI",
+                vendorExtensionId: 0x0000000E
+            )
+        } catch {
+            // A failed handshake must not leave the child process or a claimed
+            // USB interface alive for the next connection attempt.
+            disconnect()
+            throw error
+        }
     }
 
     public func disconnect() {
@@ -123,6 +170,8 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
             requestStreamContinuation = nil
             requestProcessorTask?.cancel()
             requestProcessorTask = nil
+            stderrReaderTask?.cancel()
+            stderrReaderTask = nil
 
             if let proc = process, proc.isRunning {
                 proc.terminate()
@@ -131,6 +180,7 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
             }
             process = nil
             inputPipe = nil
+            errorPipe = nil
             lineIterator = nil
         }
     }
@@ -183,8 +233,12 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         guard response["success"] as? Bool == true,
               let result = response["result"] as? [String: Any],
               let properties = result["properties"] as? [String: [String: Any]] else {
-            throw PTPError.invalidResponse("Invalid preset slot response")
+            let reason = response["error"] as? String
+                ?? ((response["result"] as? [String: Any])?["error"] as? String)
+                ?? "invalid preset slot response"
+            throw PTPError.readFailed(0xD18C, reason)
         }
+        let isEmptySlot = result["is_empty_slot"] as? Bool ?? false
 
         var name = ""
         var imageQuality: UInt32?
@@ -205,6 +259,7 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         var shadow: Int32?
         var color: Int32?
         var sharpness: Int32?
+        var highIsoNr: UInt32?
         var clarity: Int32?
         var longExpNr: UInt32?
         var colorSpace: UInt32?
@@ -222,21 +277,22 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
             case 0xD18F: imageQuality = jsonUInt32(value["raw"])
             case 0xD190: dynamicRange = jsonUInt32(value["raw"])
             case 0xD192: filmSimulation = jsonUInt32(value["raw"])
-            case 0xD193: monoWarmCool = jsonInt32(value["raw"])
-            case 0xD194: monoMagentaGreen = jsonInt32(value["raw"])
+            case 0xD193: monoWarmCool = jsonPTPInt16(value["raw"])
+            case 0xD194: monoMagentaGreen = jsonPTPInt16(value["raw"])
             case 0xD195: grainEffect = jsonUInt32(value["raw"])
             case 0xD196: colorChrome = jsonUInt32(value["raw"])
             case 0xD197: colorChromeFxBlue = jsonUInt32(value["raw"])
             case 0xD198: smoothSkin = jsonUInt32(value["raw"])
             case 0xD199: whiteBalance = jsonUInt32(value["raw"])
-            case 0xD19A: wbShiftRed = jsonInt32(value["raw"])
-            case 0xD19B: wbShiftBlue = jsonInt32(value["raw"])
+            case 0xD19A: wbShiftRed = jsonPTPInt16(value["raw"])
+            case 0xD19B: wbShiftBlue = jsonPTPInt16(value["raw"])
             case 0xD19C: colorTemp = jsonUInt32(value["raw"])
-            case 0xD19D: highlight = jsonInt32(value["raw"])
-            case 0xD19E: shadow = jsonInt32(value["raw"])
-            case 0xD19F: color = jsonInt32(value["raw"])
-            case 0xD1A0: sharpness = jsonInt32(value["raw"])
-            case 0xD1A2: clarity = jsonInt32(value["raw"])
+            case 0xD19D: highlight = jsonPTPInt16(value["raw"])
+            case 0xD19E: shadow = jsonPTPInt16(value["raw"])
+            case 0xD19F: color = jsonPTPInt16(value["raw"])
+            case 0xD1A0: sharpness = jsonPTPInt16(value["raw"])
+            case 0xD1A1: highIsoNr = jsonUInt32(value["raw"])
+            case 0xD1A2: clarity = jsonPTPInt16(value["raw"])
             case 0xD1A3: longExpNr = jsonUInt32(value["raw"])
             case 0xD1A4: colorSpace = jsonUInt32(value["raw"])
             default: break
@@ -246,6 +302,7 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         return PTPClientPresetData(
             slot: index,
             name: name,
+            isEmptySlot: isEmptySlot,
             imageQuality: imageQuality,
             imageSize: imageSize,
             dynamicRange: dynamicRange,
@@ -264,43 +321,37 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
             shadow: shadow,
             color: color,
             sharpness: sharpness,
+            highIsoNr: highIsoNr,
             clarity: clarity,
             longExpNr: longExpNr,
             colorSpace: colorSpace
         )
     }
 
-    public func writePresetSlot(_ index: Int, data: PTPClientPresetData) async throws {
-        var params: [String: any Sendable] = ["index": index]
-
-        if !data.name.isEmpty { params["name"] = data.name }
-        if let v = data.filmSimulation { params["film_simulation"] = Int(v) }
-        if let v = data.dynamicRange { params["dynamic_range"] = Int(v) }
-        if let v = data.grainEffect { params["grain_effect"] = Int(v) }
-        if let v = data.colorChrome { params["color_chrome"] = Int(v) }
-        if let v = data.colorChromeFxBlue { params["color_chrome_fx_blue"] = Int(v) }
-        if let v = data.smoothSkin { params["smooth_skin"] = Int(v) }
-        if let v = data.whiteBalance { params["white_balance"] = Int(v) }
-        if let v = data.wbShiftRed { params["wb_shift_r"] = Int(v) }
-        if let v = data.wbShiftBlue { params["wb_shift_b"] = Int(v) }
-        if let v = data.colorTemp { params["color_temp"] = Int(v) }
-        if let v = data.highlight { params["highlight"] = Int(v) }
-        if let v = data.shadow { params["shadow"] = Int(v) }
-        if let v = data.color { params["color"] = Int(v) }
-        if let v = data.sharpness { params["sharpness"] = Int(v) }
-        if let v = data.clarity { params["clarity"] = Int(v) }
-        if let v = data.monoWarmCool { params["mono_warm_cool"] = Int(v) }
-        if let v = data.monoMagentaGreen { params["mono_magenta_green"] = Int(v) }
-        if let v = data.imageSize { params["image_size"] = Int(v) }
-        if let v = data.imageQuality { params["image_quality"] = Int(v) }
-        if let v = data.longExpNr { params["long_exp_nr"] = Int(v) }
-        if let v = data.colorSpace { params["color_space"] = Int(v) }
+    public func writePresetSlot(_ index: Int, data: PTPClientPresetData) async throws -> PTPPresetSlotWriteResult {
+        try validatePresetPayload(data)
+        let params = Self.presetWriteParameters(index: index, data: data)
 
         let response = try await sendCommand("write_preset_slot", params: params)
 
-        guard response["success"] as? Bool == true else {
-            throw PTPError.writeFailed(0xD18C, "Helper returned error")
+        let result = response["result"] as? [String: Any]
+        guard response["success"] as? Bool == true,
+              let result,
+              result["verified"] as? Bool == true else {
+            let details = presetWriteFailureDetails(response: response, result: result)
+            throw PTPError.writeFailed(0xD18C, details)
         }
+
+        let warnings = presetWriteWarnings(from: result)
+        if !warnings.isEmpty {
+            let details = warnings.joined(separator: ", ")
+            NSLog("X100VI C-slot write completed with inapplicable fields: %@", details)
+        }
+        return PTPPresetSlotWriteResult(
+            slot: index,
+            createdFromEmpty: result["created_from_empty"] as? Bool ?? false,
+            warnings: warnings
+        )
     }
 
     public func readNativeProfile() async throws -> Data {
@@ -491,6 +542,53 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         let continuation: CheckedContinuation<ResponseBox, any Error>
     }
 
+    /// The exact JSON field names accepted by `x100vi_helper` for a raw C-slot
+    /// write. Kept separate from transport so object-to-request tests exercise
+    /// the same mapping that reaches the physical helper.
+    static func presetWriteParameters(
+        index: Int,
+        data: PTPClientPresetData
+    ) -> [String: any Sendable] {
+        var params: [String: any Sendable] = ["index": index]
+
+        if !data.name.isEmpty { params["name"] = data.name }
+        if let v = data.filmSimulation { params["film_simulation"] = Int(v) }
+        if let v = data.dynamicRange { params["dynamic_range"] = Int(v) }
+        if let v = data.grainEffect { params["grain_effect"] = Int(v) }
+        if let v = data.colorChrome { params["color_chrome"] = Int(v) }
+        if let v = data.colorChromeFxBlue { params["color_chrome_fx_blue"] = Int(v) }
+        if let v = data.smoothSkin { params["smooth_skin"] = Int(v) }
+        if let v = data.whiteBalance { params["white_balance"] = Int(v) }
+        if let v = data.wbShiftRed { params["wb_shift_r"] = Int(v) }
+        if let v = data.wbShiftBlue { params["wb_shift_b"] = Int(v) }
+        if let v = data.colorTemp { params["color_temp"] = Int(v) }
+        if let v = data.highlight { params["highlight"] = Int(v) }
+        if let v = data.shadow { params["shadow"] = Int(v) }
+        if let v = data.color { params["color"] = Int(v) }
+        if let v = data.sharpness { params["sharpness"] = Int(v) }
+        if let v = data.highIsoNr { params["high_iso_nr"] = Int(v) }
+        if let v = data.clarity { params["clarity"] = Int(v) }
+        if let v = data.monoWarmCool { params["mono_warm_cool"] = Int(v) }
+        if let v = data.monoMagentaGreen { params["mono_magenta_green"] = Int(v) }
+        if let v = data.imageSize { params["image_size"] = Int(v) }
+        if let v = data.imageQuality { params["image_quality"] = Int(v) }
+        if let v = data.longExpNr { params["long_exp_nr"] = Int(v) }
+        if let v = data.colorSpace { params["color_space"] = Int(v) }
+        return params
+    }
+
+    static func helperRequestData(
+        id: String,
+        command: String,
+        params: [String: any Sendable]
+    ) throws -> Data {
+        var request: [String: Any] = ["id": id, "command": command]
+        for (key, value) in params {
+            request[key] = value
+        }
+        return try JSONSerialization.data(withJSONObject: request)
+    }
+
     /// Serialise a command to the helper and return its parsed JSON response.
     /// The timeout applies to the end-to-end request/response cycle.
     @discardableResult
@@ -545,15 +643,11 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
                     return current
                 }
 
-                var fullRequest: [String: Any] = [
-                    "id": String(id),
-                    "command": request.command
-                ]
-                for (key, value) in request.params {
-                    fullRequest[key] = value
-                }
-
-                guard let data = try? JSONSerialization.data(withJSONObject: fullRequest),
+                guard let data = try? Self.helperRequestData(
+                    id: String(id),
+                    command: request.command,
+                    params: request.params
+                ),
                       let line = String(data: data, encoding: .utf8),
                       let lineData = (line + "\n").data(using: .utf8) else {
                     throw PTPError.invalidResponse("Failed to encode request")
@@ -562,7 +656,7 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
                 inputPipe.fileHandleForWriting.write(lineData)
 
                 guard let responseLine = try await iterator.next() else {
-                    throw PTPError.invalidResponse("Helper closed stdout")
+                    throw PTPError.invalidResponse(self.helperTerminationDetails(for: process))
                 }
 
                 // Store the mutated iterator back (AsyncThrowingStream iterators
@@ -578,6 +672,34 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
             } catch {
                 request.continuation.resume(throwing: error)
             }
+        }
+    }
+
+    private func appendHelperStderr(_ line: String) {
+        queue.sync {
+            let updated = self.stderrTail.isEmpty ? line : "\(self.stderrTail)\n\(line)"
+            // Preserve the most recent diagnostics without allowing a verbose
+            // helper session to retain unbounded data in the app process.
+            self.stderrTail = String(updated.suffix(4_096))
+        }
+    }
+
+    private func helperTerminationDetails(for process: Process) -> String {
+        queue.sync {
+            let summary: String
+            if let terminationSummary {
+                summary = terminationSummary
+            } else if !process.isRunning {
+                summary = process.terminationReason == .uncaughtSignal
+                    ? "signal \(process.terminationStatus)"
+                    : "exit \(process.terminationStatus)"
+            } else {
+                summary = "while still marked running"
+            }
+            let stderr = stderrTail.trimmingCharacters(in: .whitespacesAndNewlines)
+            return stderr.isEmpty
+                ? "Helper closed stdout (\(summary)); no stderr output"
+                : "Helper closed stdout (\(summary)): \(stderr)"
         }
     }
 
@@ -637,6 +759,77 @@ private func jsonInt32(_ value: Any?) -> Int32? {
     if let num = value as? NSNumber { return num.int32Value }
     if let str = value as? String, let int = Int32(str) { return int }
     return nil
+}
+
+/// Fuji's C-slot signed properties are transmitted as raw two-byte little-endian
+/// values.  JSON exposes that raw UInt16 so reconstruct its Int16 bit pattern.
+private func jsonPTPInt16(_ value: Any?) -> Int32? {
+    guard let raw = jsonUInt32(value), raw <= UInt32(UInt16.max) else { return nil }
+    return Int32(Int16(bitPattern: UInt16(raw)))
+}
+
+private func presetWriteWarnings(from result: [String: Any]) -> [String] {
+    (result["warnings"] as? [[String: Any]])?.compactMap { warning in
+        guard let property = warning["property"] as? String else { return nil }
+        let responseCode = warning["response_code"] as? String
+        return responseCode.map { "\(property): \($0)" } ?? property
+    } ?? []
+}
+
+private func presetWriteFailureDetails(
+    response: [String: Any],
+    result: [String: Any]?
+) -> String {
+    let errors = (result?["errors"] as? [[String: Any]])?.compactMap { error -> String? in
+        let property = error["property"] as? String ?? error["key"] as? String ?? "unknown property"
+        let raw = (error["requested_raw"] as? String).map { " requested \($0)" } ?? ""
+        let rc = error["rc"].map { String(describing: $0) } ?? "unknown error"
+        return "\(property)\(raw): \(rc)"
+    } ?? []
+    if !errors.isEmpty { return errors.joined(separator: ", ") }
+    if let error = response["error"] as? String { return error }
+    if let error = result?["error"] as? String { return error }
+    return "Helper write or readback verification failed"
+}
+
+/// The helper writes every C-slot setting as a two-byte payload. Validate the
+/// bridge representation before issuing `D18C`, so an invalid app/client value
+/// cannot select or partially mutate a slot.
+private func validatePresetPayload(_ data: PTPClientPresetData) throws {
+    guard (1...7).contains(data.slot) else {
+        throw PTPError.invalidResponse("Preset slot must be 1–7")
+    }
+
+    let unsigned: [(UInt16, UInt32?)] = [
+        (0xD18E, data.imageSize), (0xD18F, data.imageQuality),
+        (0xD190, data.dynamicRange), (0xD192, data.filmSimulation),
+        (0xD195, data.grainEffect), (0xD196, data.colorChrome),
+        (0xD197, data.colorChromeFxBlue), (0xD198, data.smoothSkin),
+        (0xD199, data.whiteBalance), (0xD19C, data.colorTemp),
+        (0xD1A1, data.highIsoNr), (0xD1A3, data.longExpNr),
+        (0xD1A4, data.colorSpace)
+    ]
+    for (property, value) in unsigned {
+        if let value, value > UInt32(UInt16.max) {
+            throw PTPError.invalidResponse(
+                "C-slot property 0x\(String(property, radix: 16)) raw value \(value) exceeds UInt16"
+            )
+        }
+    }
+
+    let signed: [(UInt16, Int32?)] = [
+        (0xD193, data.monoWarmCool), (0xD194, data.monoMagentaGreen),
+        (0xD19A, data.wbShiftRed), (0xD19B, data.wbShiftBlue),
+        (0xD19D, data.highlight), (0xD19E, data.shadow),
+        (0xD19F, data.color), (0xD1A0, data.sharpness), (0xD1A2, data.clarity)
+    ]
+    for (property, value) in signed {
+        if let value, !(Int32(Int16.min)...Int32(Int16.max)).contains(value) {
+            throw PTPError.invalidResponse(
+                "C-slot property 0x\(String(property, radix: 16)) raw signed value \(value) exceeds Int16"
+            )
+        }
+    }
 }
 
 

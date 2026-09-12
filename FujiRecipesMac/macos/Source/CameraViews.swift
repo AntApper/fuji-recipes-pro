@@ -307,6 +307,7 @@ public struct CameraConnectionView: View {
                 ForEach(1...7, id: \.self) { slot in
                     let loadout = loadouts.loadout(for: slot)
                     let isConfigured = loadout?.hasAnySettings ?? false
+                    let isNeverConfigured = loadouts.isCameraSlotEmpty(slot)
                     let accent = slotAccent(slot)
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -321,7 +322,7 @@ public struct CameraConnectionView: View {
                                 .shadow(color: isConfigured ? accent.opacity(0.8) : Color.clear, radius: 3)
                         }
 
-                        Text(loadout?.recipeName ?? "Empty")
+                        Text(isNeverConfigured ? "New profile" : (loadout?.recipeName ?? "Empty"))
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(isConfigured ? Theme.textPrimary : Theme.textMuted)
                             .lineLimit(1)

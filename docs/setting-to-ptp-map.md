@@ -62,11 +62,32 @@ Confirmed via FilmKit cross-referencing 7 camera presets on X100VI (2026-03).
 | `0xD19E`    | P:ShadowTone×10    | Shadow tone                                    | ×10 encoding                               |
 | `0xD19F`    | P:Color×10         | Color (Film Sim Tune)                          | ×10 encoding                               |
 | `0xD1A0`    | P:Sharpness×10     | Sharpness                                      | ×10 encoding                               |
-| `0xD1A1`    | P:HighIsoNR?       | High ISO NR (sentinel)                         | Always 0x8000 — not stored in presets     |
+| `0xD1A1`    | P:HighIsoNR         | High ISO NR                                    | Fuji proprietary 16-bit lookup; see below |
 | `0xD1A2`    | P:Clarity×10       | Clarity                                        | ×10 encoding                               |
 | `0xD1A3`    | P:LongExpNR        | Long exposure NR                               | 0=Off, 1=On                               |
 | `0xD1A4`    | P:ColorSpace       | Color space                                    | 1=sRGB, 2=AdobeRGB                        |
 | `0xD1A5`    | P:?D1A5            | Unknown                                        | Always 7                                    |
+
+### Verified C-slot raw encoding
+
+C-slot writes use 16-bit raw preset payloads, not the app's display values or
+active-shooting property encodings. `CSlotPresetEncoder` is the authoritative
+app-side translation, aligned with FilmKit's `translateUIToPresetProps` and
+the 2026-09-12 C-slot capture/regression records.
+
+- DR: `Auto=0xFFFF`, `DR100=100`, `DR200=200`, `DR400=400`.
+- Grain: `Off=1`, `Weak Small=2`, `Strong Small=3`, `Weak Large=4`,
+  `Strong Large=5`; Color Chrome, FX Blue, and Smooth Skin are `1/2/3`
+  for Off/Weak/Strong.
+- WB shifts are signed `-9...+9`. `D19C` is emitted only for Color Temperature
+  WB (`0x8007`) and only for `2500...10000 K`.
+- Highlight and shadow accept UI `-2...+4`, while color and sharpness accept
+  `-4...+4`, and clarity `-5...+5`; each is sent as signed raw tenths
+  (for example, shadow `-1` becomes `0xFFF6`, sharpness `+4` becomes
+  `0x0028`). Color is omitted for monochrome/ACROS/sepia simulations.
+- High ISO NR is not linear: `-4=0x8000`, `-3=0x7000`, `-2=0x4000`,
+  `-1=0x3000`, `0=0x2000`, `+1=0x1000`, `+2=0x0000`, `+3=0x6000`,
+  `+4=0x5000`.
 
 ### Preset Write Sequence
 

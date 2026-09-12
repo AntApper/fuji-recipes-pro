@@ -39,14 +39,16 @@ public final class CameraManager: ObservableObject {
             // USB mode; don't let that fail the whole connection.
             await readActiveSettings()
 
-            // Auto-sync C-states from camera, but do not clobber local names if
-            // the camera read fails for a slot.
-            DebugLogger.info("Auto-reading C-States from camera...", category: .camera)
-            let presetData = await readCStates()
-            DebugLogger.info("Read \(presetData.count) C-States", category: .camera)
-
-            if let loadouts = loadouts {
-                loadouts.syncFromCameraPresetData(presetData)
+            // C-slot reads select and inspect seven camera slots, so run that
+            // best-effort sync after reporting the verified PTP connection.
+            // The Hub stays interactive even if a camera-side slot read stalls.
+            Task { [weak self, weak loadouts] in
+                guard let self, self.status == .connected else { return }
+                DebugLogger.info("Auto-reading C-States from camera...", category: .camera)
+                let presetData = await self.readCStates()
+                guard self.status == .connected else { return }
+                DebugLogger.info("Read \(presetData.count) C-States", category: .camera)
+                loadouts?.syncFromCameraPresetData(presetData)
             }
         } catch {
             status = .error
@@ -94,7 +96,7 @@ public final class CameraManager: ObservableObject {
 
     // MARK: - Import Recipe to C-State
 
-    public func importRecipeToCState(_ recipe: Recipe, slot: Int) async throws {
+    public func importRecipeToCState(_ recipe: Recipe, slot: Int) async throws -> PTPPresetSlotWriteResult {
         guard let client = client, client.isConnected else {
             throw CameraError.notConnected
         }
@@ -102,35 +104,15 @@ public final class CameraManager: ObservableObject {
             throw PTPError.invalidResponse("Preset slot must be 1–7")
         }
 
-        let presetData = PTPClientPresetData(
-            slot: slot,
-            name: recipe.name,
-            imageQuality: nil,
-            dynamicRange: recipe.dynamicRange?.rawValue,
-            filmSimulation: recipe.filmSimulation?.rawValue,
-            grainEffect: recipe.grainEffect?.rawValue,
-            colorChrome: recipe.colorChrome?.rawValue,
-            colorChromeFxBlue: recipe.colorChromeFxBlue?.rawValue,
-            smoothSkin: recipe.smoothSkin?.rawValue,
-            whiteBalance: recipe.whiteBalanceMode?.actualPTPValue,
-            wbShiftRed: recipe.wbShiftRed,
-            wbShiftBlue: recipe.wbShiftBlue,
-            colorTemp: recipe.colorTempK,
-            highlight: recipe.highlight,
-            shadow: recipe.shadow,
-            color: recipe.color,
-            sharpness: recipe.sharpness,
-            clarity: recipe.clarity,
-            longExpNr: recipe.highIsoNr.map { UInt32($0) },
-            colorSpace: nil
+        return try await client.writePresetSlot(
+            slot,
+            data: CSlotPresetEncoder.encode(recipe: recipe, slot: slot)
         )
-
-        try await client.writePresetSlot(slot, data: presetData)
     }
 
     // MARK: - Write Loadout
 
-    public func writeLoadout(_ loadout: Loadout, to slot: Int) async throws {
+    public func writeLoadout(_ loadout: Loadout, to slot: Int) async throws -> PTPPresetSlotWriteResult {
         guard let client = client, client.isConnected else {
             throw CameraError.notConnected
         }
@@ -138,20 +120,10 @@ public final class CameraManager: ObservableObject {
             throw PTPError.invalidResponse("Preset slot must be 1–7")
         }
 
-        let presetData = PTPClientPresetData(
-            slot: slot,
-            name: loadout.name,
-            dynamicRange: loadout.dr?.rawValue,
-            filmSimulation: loadout.filmSim?.rawValue,
-            grainEffect: loadout.grain?.rawValue,
-            whiteBalance: loadout.wb?.actualPTPValue,
-            highlight: loadout.highlight,
-            shadow: loadout.shadow,
-            color: loadout.color,
-            sharpness: loadout.sharpness
+        return try await client.writePresetSlot(
+            slot,
+            data: CSlotPresetEncoder.encode(loadout: loadout, slot: slot)
         )
-
-        try await client.writePresetSlot(slot, data: presetData)
     }
 
     // MARK: - RAF Conversion

@@ -5,17 +5,22 @@ import FujiRecipesCore
 
 public struct RecipeListView: View {
     @ObservedObject public var store: RecipeStore
+    @ObservedObject public var cameraManager: CameraManager
     @State private var expandedRecipeIDs: Set<Recipe.ID> = []
     @State private var recipeToLoad: Recipe?
-    @State private var showLoadToSlot = false
     @State private var selectedPhotoUrl: String? = nil
+    @State private var slotWriteMessage: String?
 
+    // Expanded cards can be substantially taller than the compact cards.
+    // Top-align each adaptive grid cell so adjacent cards do not float in the
+    // middle of the selected recipe's detail area.
     private let columns = [
-        GridItem(.adaptive(minimum: 280, maximum: 540), spacing: 14)
+        GridItem(.adaptive(minimum: 280, maximum: 540), spacing: 14, alignment: .top)
     ]
 
-    public init(store: RecipeStore) {
+    public init(store: RecipeStore, cameraManager: CameraManager) {
         self.store = store
+        self.cameraManager = cameraManager
     }
 
     public var body: some View {
@@ -45,7 +50,6 @@ public struct RecipeListView: View {
                             },
                             onLoadToSlot: {
                                 recipeToLoad = recipe
-                                showLoadToSlot = true
                             },
                             onSelectPhoto: { url in
                                 selectedPhotoUrl = url
@@ -77,21 +81,25 @@ public struct RecipeListView: View {
         } message: {
             Text(store.lastError ?? "")
         }
-        .confirmationDialog("Load into Camera Custom Slot", isPresented: $showLoadToSlot, titleVisibility: .visible) {
-            ForEach(1...7, id: \.self) { slot in
-                let current = store.loadouts.loadout(for: slot)
-                Button("C\(slot) — \(current?.displayLabel ?? "Empty")") {
-                    if let recipe = recipeToLoad {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                            store.loadouts.applyRecipe(recipe, to: slot)
-                        }
-                    }
+        .sheet(item: $recipeToLoad) { recipe in
+            CSlotPickerSheet(
+                recipe: recipe,
+                loadouts: store.loadouts,
+                isCameraConnected: cameraManager.status == .connected
+            ) { slot in
+                recipeToLoad = nil
+                Task {
+                    await load(recipe, into: slot)
                 }
             }
+        }
+        .alert("C-slot Load", isPresented: Binding(
+            get: { slotWriteMessage != nil },
+            set: { if !$0 { slotWriteMessage = nil } }
+        )) {
+            Button("OK") { slotWriteMessage = nil }
         } message: {
-            if let recipe = recipeToLoad {
-                Text("Select dial slot for \"\(recipe.name)\"")
-            }
+            Text(slotWriteMessage ?? "")
         }
         .sheet(isPresented: Binding(
             get: { selectedPhotoUrl != nil },
@@ -103,6 +111,29 @@ public struct RecipeListView: View {
                     set: { if !$0 { selectedPhotoUrl = nil } }
                 ))
             }
+        }
+    }
+
+    @MainActor
+    private func load(_ recipe: Recipe, into slot: Int) async {
+        if cameraManager.status == .connected {
+            do {
+                let result = try await cameraManager.importRecipeToCState(recipe, slot: slot)
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                    store.loadouts.applyRecipe(recipe, to: slot)
+                }
+                let warningSuffix = result.warnings.isEmpty
+                    ? ""
+                    : "\n\nCamera skipped inapplicable settings: \(result.warnings.joined(separator: ", "))."
+                slotWriteMessage = "\"\(recipe.name)\" was verified on camera slot C\(slot).\(warningSuffix)"
+            } catch {
+                slotWriteMessage = "Camera slot C\(slot) was not changed: \(error.localizedDescription)"
+            }
+        } else {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                store.loadouts.applyRecipe(recipe, to: slot)
+            }
+            slotWriteMessage = "\"\(recipe.name)\" was saved locally to C\(slot). Connect a camera to write it to the physical slot."
         }
     }
 
@@ -331,6 +362,99 @@ public struct RecipeListView: View {
         return store.selectedFilterCategory == .favorites
             ? "Click the star icon on any recipe to add it to your favorites."
             : "Ensure recipes-data.json is loaded."
+    }
+}
+
+private struct CSlotPickerSheet: View {
+    let recipe: Recipe
+    @ObservedObject var loadouts: LoadoutStore
+    let isCameraConnected: Bool
+    let onSelect: (Int) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "dial.low.fill")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(Theme.fujiAmber)
+                    .frame(width: 38, height: 38)
+                    .background(Theme.fujiAmber.opacity(0.14), in: Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Send to Dial")
+                        .font(.title2.weight(.bold))
+                    Text(recipe.name)
+                        .font(.headline)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+            }
+
+            Text(isCameraConnected
+                ? "Choose a physical C1–C7 slot. The recipe is written and verified on the connected camera before this app confirms success."
+                : "Choose a local C1–C7 draft. It will not change the camera until you connect and write it.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+                spacing: 10
+            ) {
+                ForEach(1...7, id: \.self) { slot in
+                    slotButton(slot)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 520, idealWidth: 520, maxWidth: 520, minHeight: 570, idealHeight: 570)
+    }
+
+    private func slotButton(_ slot: Int) -> some View {
+        let loadout = loadouts.loadout(for: slot)
+        let isNewProfile = loadouts.isCameraSlotEmpty(slot)
+        let destination = isNewProfile ? "New profile" : (loadout?.displayLabel ?? "Empty")
+
+        return Button {
+            onSelect(slot)
+        } label: {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("C\(slot)")
+                        .font(.headline.weight(.bold))
+                    Spacer()
+                    Image(systemName: isCameraConnected ? "camera.fill" : "internaldrive")
+                        .font(.caption.weight(.semibold))
+                }
+                Text(destination)
+                    .font(.caption)
+                    .lineLimit(1)
+                Text(isCameraConnected ? "Write & verify" : "Save locally")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(isCameraConnected ? Theme.emeraldGreen : Theme.fujiAmber)
+            }
+            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+            .padding(10)
+        }
+        .buttonStyle(GlassBorderedButtonStyle(
+            accentColor: isCameraConnected ? Theme.emeraldGreen : Theme.fujiAmber,
+            height: 96
+        ))
+        .accessibilityLabel("Select C\(slot), \(destination)")
+        .help(isCameraConnected
+            ? "Write \(recipe.name) to physical slot C\(slot) and verify it"
+            : "Save \(recipe.name) locally to C\(slot)")
     }
 }
 

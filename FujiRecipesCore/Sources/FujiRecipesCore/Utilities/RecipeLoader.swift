@@ -92,73 +92,7 @@ public enum RecipeLoader {
                 recipe.sensorGeneration == "X-Trans V" &&
                 (recipe.compatibleCameras ?? []).contains("X100VI")
             }
-            .map { jsonRecipe -> Recipe in
-                let filmSim: FilmSimulation? = {
-                    guard let enumInt = jsonRecipe.filmSimEnum,
-                          let enumVal = FilmSimulation(rawValue: UInt32(enumInt)) else {
-                        return nil
-                    }
-                    return enumVal
-                }()
-
-                let dr: DynamicRange? = {
-                    guard let rawVal = jsonRecipe.ptpSettings["dynamicRange"],
-                          let enumVal = DynamicRange(rawValue: UInt32(rawVal)) else {
-                        return nil
-                    }
-                    return enumVal
-                }()
-
-                let grain: GrainEffect? = {
-                    guard let val = jsonRecipe.ptpSettings["grainEffect"],
-                          let enumVal = GrainEffect(rawValue: UInt32(val)) else {
-                        return nil
-                    }
-                    return enumVal
-                }()
-
-                let wb: WhiteBalanceMode? = {
-                    guard let rawVal = jsonRecipe.ptpSettings["whiteBalance"],
-                          let enumVal = WhiteBalanceMode(rawValue: UInt32(rawVal)) else {
-                        return nil
-                    }
-                    return enumVal
-                }()
-
-                return Recipe(
-                    id: jsonRecipe.id,
-                    name: jsonRecipe.name,
-                    source: "Fuji X Weekly",
-                    sourceUrl: jsonRecipe.sourceUrl,
-                    previewImageUrl: jsonRecipe.previewImageUrl,
-                    imageUrls: jsonRecipe.imageUrls,
-                    date: nil,
-                    dateString: jsonRecipe.date,
-                    filmSimulation: filmSim,
-                    dynamicRange: dr,
-                    grainEffect: grain,
-                    colorChrome: nil,
-                    colorChromeFxBlue: nil,
-                    smoothSkin: nil,
-                    whiteBalanceMode: wb,
-                    wbShiftRed: jsonRecipe.ptpSettings["wbShiftRed"]?.int32Value,
-                    wbShiftBlue: jsonRecipe.ptpSettings["wbShiftBlue"]?.int32Value,
-                    colorTempK: nil,
-                    highlight: jsonRecipe.ptpSettings["highlight"]?.int32Value,
-                    shadow: jsonRecipe.ptpSettings["shadow"]?.int32Value,
-                    color: jsonRecipe.ptpSettings["color"]?.int32Value,
-                    sharpness: jsonRecipe.ptpSettings["sharpness"]?.int32Value,
-                    highIsoNr: jsonRecipe.ptpSettings["highIsoNr"]?.int32Value,
-                    clarity: nil,
-                    iso: jsonRecipe.settings["iso"],
-                    exposureCompensation: jsonRecipe.settings["exposureCompensation"],
-                    settings: jsonRecipe.settings,
-                    sensorGeneration: jsonRecipe.sensorGeneration,
-                    compatibleCameras: jsonRecipe.compatibleCameras,
-                    tags: jsonRecipe.filmSimulation.map { [$0] } ?? [],
-                    parseStatus: .ok
-                )
-            }
+            .map(recipe(from:))
 
         return parsed.sorted { lhs, rhs in
             let lhsName = lhs.filmSimulation?.displayName.lowercased() ?? ""
@@ -166,6 +100,52 @@ public enum RecipeLoader {
             if lhsName != rhsName { return lhsName < rhsName }
             return lhs.name.lowercased() < rhs.name.lowercased()
         }
+    }
+
+    /// Converts one normalized source record into the app's UI-level recipe.
+    /// `presetSettings` are raw C-slot values, so decode them before passing
+    /// the result to `CSlotPresetEncoder` for a future write.
+    static func recipe(from jsonRecipe: RecipeJSON) -> Recipe {
+        let filmSim = jsonRecipe.filmSimEnum.flatMap { FilmSimulation(rawValue: UInt32($0)) }
+        let dr = jsonRecipe.presetSettings["dynamicRange"].flatMap { DynamicRange(rawValue: UInt32($0)) }
+        let grain = jsonRecipe.presetSettings["grainEffect"].flatMap { GrainEffect(rawValue: UInt32($0)) }
+        let wb = jsonRecipe.ptpSettings["whiteBalance"].flatMap { WhiteBalanceMode(rawValue: UInt32($0)) }
+
+        return Recipe(
+            id: jsonRecipe.id,
+            name: jsonRecipe.name,
+            source: "Fuji X Weekly",
+            sourceUrl: jsonRecipe.sourceUrl,
+            previewImageUrl: jsonRecipe.previewImageUrl,
+            imageUrls: jsonRecipe.imageUrls,
+            date: nil,
+            dateString: jsonRecipe.date,
+            filmSimulation: filmSim,
+            dynamicRange: dr,
+            grainEffect: grain,
+            colorChrome: jsonRecipe.presetSettings["colorChromeEffect"].flatMap { EffectIntensity(rawValue: UInt32($0)) },
+            colorChromeFxBlue: jsonRecipe.presetSettings["colorChromeFxBlue"].flatMap { EffectIntensity(rawValue: UInt32($0)) },
+            smoothSkin: jsonRecipe.presetSettings["smoothSkin"].flatMap { EffectIntensity(rawValue: UInt32($0)) },
+            whiteBalanceMode: wb,
+            wbShiftRed: jsonRecipe.presetSettings["wbShiftRed"]?.int32Value,
+            wbShiftBlue: jsonRecipe.presetSettings["wbShiftBlue"]?.int32Value,
+            colorTempK: jsonRecipe.presetSettings["colorTemp"].flatMap { UInt32(exactly: $0) },
+            highlight: CSlotPresetEncoder.uiTone(from: jsonRecipe.presetSettings["highlightTone"]?.int32Value),
+            shadow: CSlotPresetEncoder.uiTone(from: jsonRecipe.presetSettings["shadowTone"]?.int32Value),
+            color: CSlotPresetEncoder.uiTone(from: jsonRecipe.presetSettings["color"]?.int32Value),
+            sharpness: CSlotPresetEncoder.uiTone(from: jsonRecipe.presetSettings["sharpness"]?.int32Value),
+            highIsoNr: CSlotPresetEncoder.uiHighIsoNR(
+                from: jsonRecipe.presetSettings["highIsoNr"].flatMap { UInt32(exactly: $0) }
+            ),
+            clarity: CSlotPresetEncoder.uiTone(from: jsonRecipe.presetSettings["clarity"]?.int32Value),
+            iso: jsonRecipe.settings["iso"],
+            exposureCompensation: jsonRecipe.settings["exposureCompensation"],
+            settings: jsonRecipe.settings,
+            sensorGeneration: jsonRecipe.sensorGeneration,
+            compatibleCameras: jsonRecipe.compatibleCameras,
+            tags: jsonRecipe.filmSimulation.map { [$0] } ?? [],
+            parseStatus: .ok
+        )
     }
 }
 

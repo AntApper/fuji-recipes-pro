@@ -152,12 +152,8 @@ public final class RecipeStore: ObservableObject {
     }
 
     public func loadRecipes() {
-        let bundle = Bundle.module.url(forResource: "recipes-data", withExtension: "json") != nil
-            ? Bundle.module
-            : Bundle.main
-
         do {
-            recipes = try RecipeLoader.loadRecipes(from: bundle)
+            recipes = try RecipeLoader.loadRecipes(from: .main)
             lastError = nil
             DebugLogger.info("Loaded \(recipes.count) recipes", category: .recipes)
         } catch {

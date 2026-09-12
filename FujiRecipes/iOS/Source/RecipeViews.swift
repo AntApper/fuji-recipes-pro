@@ -48,7 +48,10 @@ struct RecipeDetailView: View {
         }
         .confirmationDialog("Load to slot", isPresented: $showLoadToSlot, titleVisibility: .visible) {
             ForEach((1...7).map { $0 }, id: \.self) { slot in
-                Button("C\(slot) — \(loadouts.loadout(for: slot)?.displayLabel ?? "empty")") {
+                let destination = loadouts.isCameraSlotEmpty(slot)
+                    ? "New profile draft"
+                    : (loadouts.loadout(for: slot)?.displayLabel ?? "empty")
+                Button("C\(slot) — \(destination)") {
                     loadouts.applyRecipe(recipe, to: slot)
                 }
             }

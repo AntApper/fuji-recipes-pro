@@ -62,6 +62,7 @@ enum PTPHelperCommand: Codable {
 
 struct PTPHelperPresetData: Codable {
     let name: String
+    let imageSize: UInt32?
     let imageQuality: UInt32?
     let dynamicRange: UInt32?
     let filmSimulation: UInt32?
@@ -77,6 +78,7 @@ struct PTPHelperPresetData: Codable {
     let shadow: Int32?
     let color: Int32?
     let sharpness: Int32?
+    let highIsoNr: UInt32?
     let clarity: Int32?
     let longExpNr: UInt32?
     let colorSpace: UInt32?
@@ -99,6 +101,7 @@ extension PTPHelperPresetData {
         let wrapper: [String: Any] = [
             "slot": 0,
             "name": name,
+            "imageSize": imageSize as Any,
             "imageQuality": imageQuality as Any,
             "dynamicRange": dynamicRange as Any,
             "filmSimulation": filmSimulation as Any,
@@ -114,6 +117,7 @@ extension PTPHelperPresetData {
             "shadow": shadow as Any,
             "color": color as Any,
             "sharpness": sharpness as Any,
+            "highIsoNr": highIsoNr as Any,
             "clarity": clarity as Any,
             "longExpNr": longExpNr as Any,
             "colorSpace": colorSpace as Any,

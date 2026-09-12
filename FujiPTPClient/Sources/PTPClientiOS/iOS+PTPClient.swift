@@ -90,7 +90,7 @@ public final class IOSSession: PTPClientProtocol, @unchecked Sendable {
         return PTPClientPresetData(slot: index)
     }
 
-    public func writePresetSlot(_ index: Int, data: PTPClientPresetData) async throws {
+    public func writePresetSlot(_ index: Int, data: PTPClientPresetData) async throws -> PTPPresetSlotWriteResult {
         guard isConnectedFlag else { throw PTPError.notConnected }
         guard (1...7).contains(index) else {
             throw PTPError.invalidResponse("Preset slot must be 1–7")
@@ -102,6 +102,7 @@ public final class IOSSession: PTPClientProtocol, @unchecked Sendable {
         // 3. SetDevicePropValue(0xD190, dr)
         // 4. SetDevicePropValue(0xD192, filmSim)
         // ... etc
+        return PTPPresetSlotWriteResult(slot: index)
     }
 
     public func readNativeProfile() async throws -> Data {
