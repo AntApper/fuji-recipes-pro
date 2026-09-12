@@ -15,22 +15,22 @@ A cross-platform native macOS and iOS application suite designed for **Fujifilm 
 ### 1. Recipes Studio
 Browse, search, and filter formulations by film simulation family, dynamic range, and exposure parameters. Features real-time tone curve radar indicators, color-temperature Kelvin chips, and full photo lightboxes.
 
-![Recipes Studio View](./docs/screenshots/recipes_studio_v1789235783.png)
+![Recipes Studio View](./docs/screenshots/recipes_studio_v3.png)
 
 ### 2. Custom Dial Bank Matrix (C1–C7)
 Map recipes directly to physical custom camera positions C1 through C7. Inspect tone curves and tune parameter offsets with the interactive in-place slot editor.
 
-![C1-C7 Preset Matrix](./docs/screenshots/custom_dial_matrix_v1789235783.png)
+![C1-C7 Preset Matrix](./docs/screenshots/custom_dial_matrix_v3.png)
 
 ### 3. Camera Telemetry & Hardware Hub
 Live PTP session telemetry over USB-C, device status monitoring, vendor opcode diagnostic indicators, and connection recovery troubleshooting.
 
-![Camera Hub](./docs/screenshots/camera_hub_v1789235783.png)
+![Camera Hub](./docs/screenshots/camera_hub_v3.png)
 
 ### 4. In-Camera RAF Darkroom
 Direct raw `.RAF` payload processing powered by the X100VI's dedicated on-sensor imaging pipeline.
 
-![RAF Darkroom](./docs/screenshots/darkroom_v1789235783.png)
+![RAF Darkroom](./docs/screenshots/darkroom_v3.png)
 
 ---
 
