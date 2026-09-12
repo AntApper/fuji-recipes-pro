@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- PTP over USB-C does not use AVCaptureDevice; the camera entitlement is
+	     not required and would need a matching usage string. -->
+</dict>
+</plist>

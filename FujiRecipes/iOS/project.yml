@@ -1,0 +1,47 @@
+name: FujiRecipes
+options:
+  bundleIdPrefix: com.ant
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+  generateLastUpgradeCheck: "1500"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ENABLE_BITCODE: NO
+
+targets:
+  FujiRecipes:
+    type: application
+    platform: iOS
+    sources:
+      - Source
+      - path: Resources
+        type: file
+    dependencies:
+      - package: FujiRecipesCore
+      - package: FujiPTPClient
+        product: PTPClientiOS
+    settings:
+      base:
+        INFOPLIST_FILE: Source/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: "Fuji Recipes"
+        INFOPLIST_KEY_CFBundleName: "Fuji Recipes"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        PRODUCT_BUNDLE_IDENTIFIER: com.ant.fuji-recipes
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_ENTITLEMENTS: Source/FujiRecipes.entitlements
+      configurations:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.ant.fuji-recipes.debug
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.ant.fuji-recipes.release
+
+packages:
+  FujiRecipesCore:
+    path: ../../FujiRecipesCore
+  FujiPTPClient:
+    path: ../../FujiPTPClient

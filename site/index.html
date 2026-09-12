@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fuji X-Trans V Recipe Library</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Private X-Trans V Library</p>
+          <h1>Fujifilm Recipe Library</h1>
+          <p class="intro">Browse scraped recipe settings, source links, compatibility hints, and example photos in a fast dark UI.</p>
+        </div>
+        <div class="stats" aria-live="polite">
+          <div>
+            <span id="recipeCount">--</span>
+            <small>recipes</small>
+          </div>
+          <div>
+            <span id="visibleCount">--</span>
+            <small>visible</small>
+          </div>
+        </div>
+      </header>
+
+      <section class="toolbar" aria-label="Library filters">
+        <label class="search">
+          <span>Search</span>
+          <input id="searchInput" type="search" placeholder="Kodak, Reala, X100VI, DR400..." autocomplete="off">
+        </label>
+        <label>
+          <span>Film sim</span>
+          <select id="filmFilter">
+            <option value="">All film simulations</option>
+          </select>
+        </label>
+        <label>
+          <span>Sensor gen</span>
+          <select id="sensorFilter">
+            <option value="">All sensors</option>
+            <option value="X-Trans V">X-Trans V</option>
+            <option value="X-Trans IV">X-Trans IV</option>
+          </select>
+        </label>
+        <label>
+          <span>Status</span>
+          <select id="statusFilter">
+            <option value="">All statuses</option>
+            <option value="ok">Parsed OK</option>
+            <option value="needs_review">Needs review</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="loadout-bar" aria-label="C1-C7 Loadout Builder">
+        <button class="loadout-toggle" id="loadoutToggle" type="button" aria-expanded="false">
+          <span class="loadout-icon">⚡</span>
+          <span>C1–C7 Loadout</span>
+          <span class="loadout-count" id="loadoutCount">0/7</span>
+        </button>
+        <div class="loadout-panel" id="loadoutPanel" role="region" aria-hidden="true">
+          <div class="loadout-slots" id="loadoutSlots"></div>
+          <div class="loadout-actions">
+            <button class="action-button" id="importLoadout" type="button">Import JSON</button>
+            <button class="action-button" id="clearLoadout" type="button">Clear all</button>
+            <button class="action-button primary" id="exportLoadout" type="button">Export JSON</button>
+          </div>
+        </div>
+      </section>
+
+      <main class="layout">
+        <aside class="recipe-list" aria-label="Recipes">
+          <div id="recipeList" class="list-inner"></div>
+        </aside>
+
+        <section id="recipeDetail" class="detail" aria-live="polite">
+          <div class="empty-state">
+            <p>Loading recipes...</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="listItemTemplate">
+      <button class="recipe-button" type="button">
+        <span class="recipe-button-title"></span>
+        <span class="recipe-button-meta"></span>
+      </button>
+    </template>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

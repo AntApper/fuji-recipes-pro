@@ -1,0 +1,1826 @@
+/*
+ * x100vi_helper.c - Standalone helper for X100VI preset slot access.
+ *
+ * Uses libusb to send PTP containers via bulk transfer.
+ * Communicates via line-delimited JSON over stdin/stdout.
+ *
+ * Build:
+ *   gcc -o x100vi_helper x100vi_helper.c -I/opt/homebrew/include -L/opt/homebrew/lib -lusb-1.0
+ *
+ * Run:
+ *   echo '{"id":"1","command":"ping"}' | ./x100vi_helper
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <libusb-1.0/libusb.h>
+#include <unistd.h>  /* for usleep */
+
+#define FUJI_VENDOR       0x04CB
+#define X100VI_PRODUCT    0x0305
+
+/* ── PTP Property Definitions ─────────────────────────────────────────── */
+
+typedef struct {
+    uint16_t code;
+    const char *name;
+    const char *key;
+    bool is_preset_slot;
+} PropDef;
+
+static const PropDef preset_props[] = {
+    {0xD18C, "Preset Slot",           "slot",           true},
+    {0xD18D, "Preset Name",           "name",           true},
+    {0xD18E, "Image Size",            "image_size",     true},
+    {0xD18F, "Image Quality",         "image_quality",  true},
+    {0xD190, "Dynamic Range",         "dynamic_range",  true},
+    {0xD191, "Unknown D191",          "unknown_d191",   true},
+    {0xD192, "Film Simulation",       "film_simulation", true},
+    {0xD193, "Mono Warm/Cool",        "mono_warm_cool", true},
+    {0xD194, "Mono Mag/Green",        "mono_magenta_green", true},
+    {0xD195, "Grain Effect",          "grain_effect",   true},
+    {0xD196, "Color Chrome",          "color_chrome",   true},
+    {0xD197, "Color Chrome FX Blue",  "color_chrome_fxb", true},
+    {0xD198, "Smooth Skin",           "smooth_skin",    true},
+    {0xD199, "White Balance",         "white_balance",  true},
+    {0xD19A, "WB Shift Red",          "wb_shift_r",     true},
+    {0xD19B, "WB Shift Blue",         "wb_shift_b",     true},
+    {0xD19C, "Color Temp (K)",        "color_temp",     true},
+    {0xD19D, "Highlight Tone",        "highlight",      true},
+    {0xD19E, "Shadow Tone",           "shadow",         true},
+    {0xD19F, "Color",                 "color",          true},
+    {0xD1A0, "Sharpness",             "sharpness",      true},
+    {0xD1A1, "High ISO NR",           "high_iso_nr",    true},
+    {0xD1A2, "Clarity",               "clarity",        true},
+    {0xD1A3, "Long Exp NR",           "long_exp_nr",    true},
+    {0xD1A4, "Color Space",           "color_space",    true},
+    {0xD1A5, "Unknown D1A5",          "unknown_d1a5",   true},
+    {0, NULL, NULL, false}
+};
+
+static const PropDef active_props[] = {
+    {0xD001, "Film Simulation",       "film_simulation",    false},
+    {0xD007, "Dynamic Range",         "dynamic_range",      false},
+    {0x5005, "White Balance",         "white_balance",      false},
+    {0xD023, "Grain Effect",          "grain_effect",       false},
+    {0xD002, "Color",                 "color",              false},
+    {0xD00B, "WB Shift Red",          "wb_shift_r",         false},
+    {0xD00C, "WB Shift Blue",         "wb_shift_b",         false},
+    {0xD017, "Color Temperature",     "color_temp",         false},
+    {0xD185, "Native Profile",        "native_profile",     false},
+    {0xD20B, "Device Name",           "device_name",        false},
+    {0xD242, "Battery Level",         "battery_level",      false},
+    {0, NULL, NULL, false}
+};
+
+/* ── Value Resolution ─────────────────────────────────────────────────── */
+
+static const char *r_film(uint32_t v) {
+    static const char *n[] = {"","PROVIA","VELVIA","ASTIA","PRO_NEG_HI","PRO_NEG_STD",
+        "MONOCHROME","MONO_Y","MONO_R","MONO_G","SEPIA","CLASSIC_CHROME","ACROS",
+        "ACROS_Y","ACROS_R","ACROS_G","ETERNA","CLASSIC_NEG","ETERNA_BB","nostalgic_neg","reala_ace"};
+    return (v>=1 && v<=20) ? n[v] : NULL;
+}
+static const char *r_dr(uint32_t v) {
+    if (v==65535) return "AUTO";
+    static const char *n[] = {"","100","200","400"};
+    return (v>=100 && v<=400) ? n[v/100] : NULL;
+}
+static const char *r_grain(uint32_t v) {
+    static const char *n[] = {"OFF","WEAK_SMALL","STRONG_SMALL","WEAK_LARGE","STRONG_LARGE"};
+    return (v<=4) ? n[v] : NULL;
+}
+static const char *r_chrome(uint32_t v) {
+    static const char *n[] = {"OFF","WEAK","STRONG"};
+    return (v<=2) ? n[v] : NULL;
+}
+static const char *r_wb(uint32_t v) {
+    switch(v) {
+        case 0: return "AS_SHOT"; case 2: return "AUTO"; case 4: return "DAYLIGHT";
+        case 8: return "UNDERWATER"; case 32769: return "FL_1"; case 32770: return "FL_2";
+        case 32771: return "FL_3"; case 32774: return "SHADE";
+        case 32775: return "COLOR_TEMP"; case 32801: return "AMBIENCE";
+    }
+    return NULL;
+}
+static const char *resolve(const char *key, uint32_t v) {
+    if (!strcmp(key,"film_simulation")) return r_film(v);
+    if (!strcmp(key,"dynamic_range")) return r_dr(v);
+    if (!strcmp(key,"grain_effect")) return r_grain(v);
+    if (!strcmp(key,"color_chrome")||!strcmp(key,"color_chrome_fxb")||!strcmp(key,"smooth_skin"))
+        return r_chrome(v);
+    if (!strcmp(key,"white_balance")) return r_wb(v);
+    return NULL;
+}
+
+/* ── JSON Helpers ─────────────────────────────────────────────────────── */
+
+static void json_escape_string(FILE *f, const char *s) {
+    fputc('"', f);
+    while (*s) {
+        switch (*s) {
+            case '"': fputs("\\\"", f); break;
+            case '\\': fputs("\\\\", f); break;
+            case '\n': fputs("\\n", f); break;
+            case '\r': fputs("\\r", f); break;
+            case '\t': fputs("\\t", f); break;
+            default: fputc(*s, f); break;
+        }
+        s++;
+    }
+    fputc('"', f);
+}
+
+/* ── PTP Container Operations ────────────────────────────────────────── */
+
+/* Helper to write uint32 in little-endian */
+static void put_u32_le(uint8_t *buf, uint32_t val) {
+    buf[0] = val & 0xFF;
+    buf[1] = (val >> 8) & 0xFF;
+    buf[2] = (val >> 16) & 0xFF;
+    buf[3] = (val >> 24) & 0xFF;
+}
+
+/* Helper to write uint16 in little-endian */
+static void put_u16_le(uint8_t *buf, uint16_t val) {
+    buf[0] = val & 0xFF;
+    buf[1] = (val >> 8) & 0xFF;
+}
+
+/* Global transaction ID - starts at 0, increments per FilmKit/rawji */
+static uint32_t g_transactionId = 0;
+
+static int ptp_send(libusb_device_handle *dev, uint16_t code, int paramCount, const uint32_t *params) {
+    /* PTP Container: length(4) + type(2) + code(2) + trans_id(4) + params(N*4) */
+    uint32_t totalLen = 12 + paramCount * 4;
+    uint8_t buf[32];
+    memset(buf, 0, sizeof(buf));
+    put_u32_le(buf, totalLen);           /* [0-3] length */
+    put_u16_le(buf + 4, 0x0001);         /* [4-5] type: Command (0x0001) */
+    put_u16_le(buf + 6, code);           /* [6-7] operation code */
+    put_u32_le(buf + 8, ++g_transactionId);  /* [8-11] transaction ID (incrementing) */
+    for (int i = 0; i < paramCount && i < 5; i++) {
+        put_u32_le(buf + 12 + i * 4, params[i]);
+    }
+
+    int transferred = 0;
+    int rc = libusb_bulk_transfer(dev, 0x01, buf, (int)totalLen, &transferred, 5000);
+    fprintf(stderr, "[DEBUG] ptp_send: code=0x%04X len=%u transferred=%d rc=%d\n", code, totalLen, transferred, rc);
+    return rc;
+}
+
+/* Send a DATA container (type=0x0002) — NO params, just header + raw data */
+static int ptp_send_data(libusb_device_handle *dev, uint16_t code,
+                          uint32_t transactionId,
+                          const uint8_t *data, uint32_t dataLen) {
+    /* DATA container: 12-byte header + raw data (NO params) */
+    uint32_t totalLen = 12 + dataLen;
+    uint8_t header[12];
+    put_u32_le(header, totalLen);
+    put_u16_le(header + 4, 0x0002);  /* type: Data */
+    put_u16_le(header + 6, code);
+    put_u32_le(header + 8, transactionId);
+
+    /* For small payloads, send header + data in one transfer */
+    if (totalLen <= 65536) {  /* ≤ 64KB — fits in one transfer */
+        uint8_t buf[65600];
+        memcpy(buf, header, 12);
+        if (dataLen > 0) memcpy(buf + 12, data, dataLen);
+        int transferred = 0;
+        int rc = libusb_bulk_transfer(dev, 0x01, buf, (int)totalLen, &transferred, 30000);
+        fprintf(stderr, "[DEBUG] ptp_send_data: code=0x%04X len=%u transferred=%d rc=%d\n",
+                code, totalLen, transferred, rc);
+        return rc;
+    }
+
+    /* For large payloads (RAF files), send header+data chunked at 512KB
+     * like FilmKit. The entire container is split across multiple USB
+     * transfers but remains one logical PTP container. */
+    const uint32_t chunkSize = 512 * 1024;
+    uint32_t containerOffset = 0;  /* offset within the logical container */
+    int chunkCount = 0;
+
+    while (containerOffset < totalLen) {
+        uint32_t remaining = totalLen - containerOffset;
+        uint32_t thisChunk = remaining < chunkSize ? remaining : chunkSize;
+        int transferred = 0;
+        unsigned char *chunkPtr;
+        int needFree = 0;
+
+        /* First chunk: header + start of data */
+        if (containerOffset == 0) {
+            uint8_t *buf = (uint8_t *)malloc(thisChunk);
+            if (!buf) return -99;
+            memcpy(buf, header, 12);
+            if (thisChunk > 12) memcpy(buf + 12, data, thisChunk - 12);
+            chunkPtr = buf;
+            needFree = 1;
+        } else {
+            /* Subsequent chunks: continue with data */
+            chunkPtr = (unsigned char *)(data + (containerOffset - 12));
+        }
+
+        int rc = libusb_bulk_transfer(dev, 0x01, chunkPtr, (int)thisChunk, &transferred, 30000);
+        if (needFree) free(chunkPtr);
+        if (rc != LIBUSB_SUCCESS) {
+            fprintf(stderr, "[DEBUG] ptp_send_data chunk %d: offset=%u/%u rc=%d\n",
+                    chunkCount, containerOffset, totalLen, rc);
+            return rc;
+        }
+        containerOffset += thisChunk;
+        chunkCount++;
+    }
+    fprintf(stderr, "[DEBUG] ptp_send_data: code=0x%04X total=%u chunks=%d rc=0\n",
+            code, totalLen, chunkCount);
+    return LIBUSB_SUCCESS;
+}
+
+/* Send PTP container WITH data (deprecated - use ptp_send_data for vendor commands) */
+static int ptp_send_with_data(libusb_device_handle *dev, uint16_t code,
+                               int paramCount, const uint32_t *params,
+                               const uint8_t *data, uint32_t dataLen) {
+    uint8_t buf[256];
+    memset(buf, 0, sizeof(buf));
+    uint32_t headerLen = 12 + paramCount * 4;
+    uint32_t totalLen = headerLen + dataLen;
+    put_u32_le(buf, totalLen);
+    put_u16_le(buf + 4, 0x0001);  /* type: Command */
+    put_u16_le(buf + 6, code);
+    put_u32_le(buf + 8, ++g_transactionId);
+    for (int i = 0; i < paramCount && i < 5; i++) {
+        put_u32_le(buf + 12 + i * 4, params[i]);
+    }
+    memcpy(buf + headerLen, data, dataLen);
+
+    int transferred = 0;
+    return libusb_bulk_transfer(dev, 0x01, buf, (int)(headerLen + dataLen), &transferred, 5000);
+}
+
+/* Forward declarations */
+static int ptp_recv(libusb_device_handle *dev, uint8_t *resp, int maxlen, int *outlen);
+static int write_prop(libusb_device_handle *dev, uint16_t prop, uint8_t *data, uint32_t dataLen);
+static int ptp_send_data(libusb_device_handle *dev, uint16_t code,
+                          uint32_t transactionId,
+                          const uint8_t *data, uint32_t dataLen);
+
+/* Send COMMAND only (no DATA), receive RESPONSE */
+static int send_command_only(libusb_device_handle *dev, uint16_t code,
+                             int paramCount, const uint32_t *params) {
+    uint8_t resp[64]; int len = 0;
+
+    /* Send COMMAND */
+    int rc = ptp_send(dev, code, paramCount, params);
+    if (rc != LIBUSB_SUCCESS) return rc;
+
+    /* Receive RESPONSE */
+    rc = ptp_recv(dev, resp, sizeof(resp), &len);
+    if (rc != LIBUSB_SUCCESS) return rc;
+    if (len < 8) return -2;
+
+    uint16_t type = resp[4] | (resp[5] << 8);
+    uint16_t respCode = resp[6] | (resp[7] << 8);
+    fprintf(stderr, "[DEBUG] send_command_only: type=0x%04X code=0x%04X\n", type, respCode);
+    if (type != 0x0003) return -3;
+
+    return (respCode == 0x2001) ? 0 : -4;
+}
+
+/* Clear endpoint halt (stall) — recovers from LIBUSB_ERROR_PIPE */
+static int clear_endpoint_halt(libusb_device_handle *dev, uint8_t endpoint) {
+    int rc = libusb_clear_halt(dev, endpoint);
+    fprintf(stderr, "[DEBUG] clear_endpoint_halt: ep=0x%02X rc=%d\n", endpoint, rc);
+    return rc;
+}
+
+/* Send vendor command with data — proper 3-phase PTP (COMMAND, DATA, RESPONSE)
+ *
+ * KEY DIFFERENCE from standard PTP:
+ * - COMMAND and DATA are sent as SEPARATE USB transfers (like FilmKit/rawji)
+ * - DATA container has NO params — 12-byte header + raw data only
+ * - Large data is chunked (64KB per chunk)
+ * - Includes stall recovery for robustness
+ *
+ * This matches the protocol used by FilmKit (WebUSB) and rawji (PyUSB).
+ */
+static int send_vendor_command(libusb_device_handle *dev, uint16_t code,
+                                int cmdParamCount, const uint32_t *cmdParams,
+                                const uint8_t *data, uint32_t dataLen,
+                                int timeoutMs) {
+    uint8_t resp[64]; int len = 0;
+    uint32_t transId = ++g_transactionId;
+    int rc;
+
+    fprintf(stderr, "[VENDOR] command=0x%04X transId=%u params=%d data=%u timeout=%dms\n",
+            code, transId, cmdParamCount, dataLen, timeoutMs);
+
+    /* Phase 1: Send COMMAND container (type=0x0001, with params) */
+    uint32_t cmdLen = 12 + cmdParamCount * 4;
+    uint8_t cmdBuf[32];
+    memset(cmdBuf, 0, sizeof(cmdBuf));
+    put_u32_le(cmdBuf, cmdLen);
+    put_u16_le(cmdBuf + 4, 0x0001);  /* type: Command */
+    put_u16_le(cmdBuf + 6, code);
+    put_u32_le(cmdBuf + 8, transId);
+    for (int i = 0; i < cmdParamCount && i < 5; i++) {
+        put_u32_le(cmdBuf + 12 + i * 4, cmdParams[i]);
+    }
+
+    int transferred = 0;
+    rc = libusb_bulk_transfer(dev, 0x01, cmdBuf, (int)cmdLen, &transferred, timeoutMs);
+    fprintf(stderr, "[VENDOR] CMD sent: len=%u transferred=%d rc=%d\n", cmdLen, transferred, rc);
+    if (rc == LIBUSB_ERROR_PIPE) {
+        fprintf(stderr, "[VENDOR] CMD endpoint stalled, clearing halt...\n");
+        clear_endpoint_halt(dev, 0x01);
+        /* Small delay after clearing halt */
+        usleep(100000);  /* 100ms */
+        return -100;  /* Signal stall */
+    }
+    if (rc != LIBUSB_SUCCESS) {
+        fprintf(stderr, "[VENDOR] CMD failed: rc=%d\n", rc);
+        return rc;
+    }
+
+    /* Phase 2: Send DATA container (type=0x0002, NO params, raw data only) */
+    /* This matches FilmKit/rawji: DATA container = 12-byte header + data, no params */
+    rc = ptp_send_data(dev, code, transId, data, dataLen);
+    if (rc == LIBUSB_ERROR_PIPE) {
+        fprintf(stderr, "[VENDOR] DATA endpoint stalled, clearing halt...\n");
+        clear_endpoint_halt(dev, 0x01);
+        usleep(100000);
+        return -100;  /* Signal stall */
+    }
+    if (rc != LIBUSB_SUCCESS) {
+        fprintf(stderr, "[VENDOR] DATA failed: rc=%d\n", rc);
+        return rc;
+    }
+
+    /* Phase 3: Receive RESPONSE container (type=0x0003) */
+    /* Small delay before reading response (camera needs to process) */
+    usleep(10000);  /* 10ms */
+    rc = ptp_recv(dev, resp, sizeof(resp), &len);
+    if (rc == LIBUSB_ERROR_PIPE) {
+        fprintf(stderr, "[VENDOR] RESP endpoint stalled, clearing halt...\n");
+        clear_endpoint_halt(dev, 0x81);
+        usleep(200000);  /* 200ms settle after clear */
+        /* Retry once after clearing halt — macOS libusb commonly stalls */
+        rc = ptp_recv(dev, resp, sizeof(resp), &len);
+        if (rc == LIBUSB_ERROR_PIPE) {
+            fprintf(stderr, "[VENDOR] RESP still stalled after retry, giving up\n");
+            return -101;  /* Signal IN stall */
+        }
+    }
+    if (rc != LIBUSB_SUCCESS) {
+        fprintf(stderr, "[VENDOR] RESP recv failed: rc=%d len=%d\n", rc, len);
+        return rc;
+    }
+    if (len < 12) {
+        fprintf(stderr, "[VENDOR] RESP too short: %d bytes\n", len);
+        return -2;
+    }
+
+    uint16_t type = resp[4] | (resp[5] << 8);
+    uint16_t respCode = resp[6] | (resp[7] << 8);
+    fprintf(stderr, "[VENDOR] RESP: type=0x%04X code=0x%04X len=%d\n", type, respCode, len);
+    if (type != 0x0003) {
+        fprintf(stderr, "[VENDOR] Expected RESPONSE, got type 0x%04X\n", type);
+        return -3;
+    }
+    if (respCode != 0x2001) {
+        fprintf(stderr, "[VENDOR] Response code 0x%04X (not OK 0x2001)\n", respCode);
+    }
+    return (respCode == 0x2001) ? 0 : (int)respCode;
+}
+
+/* Send COMMAND + DATA (COMBINED in single transfer), receive RESPONSE
+ * DEPRECATED — use send_vendor_command for Fuji vendor operations */
+static int send_two_phase_combined(libusb_device_handle *dev, uint16_t code,
+                                   int paramCount, const uint32_t *params,
+                                   const uint8_t *data, uint32_t dataLen) {
+    uint8_t resp[64]; int len = 0;
+    uint8_t combined[1024];
+    uint32_t cmdHeaderLen = 12 + paramCount * 4;
+
+    /* Build COMMAND */
+    put_u32_le(combined, cmdHeaderLen);
+    put_u16_le(combined + 4, 0x0001);
+    put_u16_le(combined + 6, code);
+    uint32_t transId = ++g_transactionId;
+    put_u32_le(combined + 8, transId);
+    for (int i = 0; i < paramCount && i < 5; i++) {
+        put_u32_le(combined + 12 + i * 4, params[i]);
+    }
+
+    /* Build DATA (same transId) */
+    uint32_t dataHeaderLen = 12 + paramCount * 4;
+    uint32_t dataTotalLen = dataHeaderLen + dataLen;
+    uint32_t offset = cmdHeaderLen;
+    put_u32_le(combined + offset, dataTotalLen); offset += 4;
+    put_u16_le(combined + offset, 0x0002); offset += 2;
+    put_u16_le(combined + offset, code); offset += 2;
+    put_u32_le(combined + offset, transId); offset += 4;
+    memcpy(combined + offset, data, dataLen);
+
+    uint32_t totalLen = offset + dataLen;
+    int transferred = 0;
+    fprintf(stderr, "[DEBUG] send_two_phase_combined: %u bytes total\n", totalLen);
+    int rc = libusb_bulk_transfer(dev, 0x01, combined, (int)totalLen, &transferred, 5000);
+    fprintf(stderr, "[DEBUG] send_two_phase_combined sent: rc=%d transferred=%d\n", rc, transferred);
+    if (rc != LIBUSB_SUCCESS) return rc;
+
+    /* RESPONSE */
+    rc = ptp_recv(dev, resp, sizeof(resp), &len);
+    if (rc != LIBUSB_SUCCESS) return rc;
+    if (len < 8) return -2;
+    uint16_t type = resp[4] | (resp[5] << 8);
+    uint16_t respCode = resp[6] | (resp[7] << 8);
+    fprintf(stderr, "[DEBUG] send_two_phase_combined RESP: type=0x%04X code=0x%04X\n", type, respCode);
+    if (type != 0x0003) return -3;
+    return (respCode == 0x2001) ? 0 : -4;
+}
+
+/* Send OBJECT_INFO to camera (Fuji vendor command 0x900C) */
+/* Vendor command functions - DISABLED (cause device stall) */
+/* static int send_object_info(...) { ... } */
+/* static int send_object_data(...) { ... } */
+
+static int ptp_recv(libusb_device_handle *dev, uint8_t *resp, int maxlen, int *outlen) {
+    /* Read first chunk to get the container length from header */
+    int total = 0;
+    int transferred = 0;
+    int rc = libusb_bulk_transfer(dev, 0x81, resp, maxlen, &transferred, 5000);
+    if (rc != LIBUSB_SUCCESS) return rc;
+    total = transferred;
+
+    if (total < 4) {
+        *outlen = total;
+        return LIBUSB_SUCCESS;
+    }
+
+    /* Parse container length from header */
+    uint32_t containerLen = resp[0] | (resp[1] << 8) | (resp[2] << 16) | (resp[3] << 24);
+
+    /* Read remaining bytes if needed (for large responses) */
+    while (total < (int)containerLen && total < maxlen) {
+        transferred = 0;
+        rc = libusb_bulk_transfer(dev, 0x81, resp + total, maxlen - total, &transferred, 5000);
+        if (rc != LIBUSB_SUCCESS) return rc;
+        total += transferred;
+    }
+
+    *outlen = total;
+    return LIBUSB_SUCCESS;
+}
+
+/* Receive complete PTP response (handles DATA+RESPONSE sequence) */
+static int ptp_recv_full(libusb_device_handle *dev, uint8_t *resp, int maxlen, int *outlen) {
+    int total = 0;
+    int phase = 0;  /* 0=first container, 1=second container */
+    
+    while (total < maxlen) {
+        int transferred = 0;
+        int rc = libusb_bulk_transfer(dev, 0x81, resp + total, maxlen - total, &transferred, 10000);
+        if (rc != LIBUSB_SUCCESS) return rc;
+        total += transferred;
+        
+        /* Check if we have a complete container */
+        if (total >= 12) {
+            uint32_t containerLen = resp[0] | (resp[1] << 8) | (resp[2] << 16) | (resp[3] << 24);
+            if (total >= containerLen) {
+                phase++;
+                if (phase >= 2) break;  /* Got both containers */
+                /* Shift remaining data to beginning */
+                int remaining = total - containerLen;
+                if (remaining > 0) {
+                    memmove(resp, resp + containerLen, remaining);
+                    total = remaining;
+                } else {
+                    total = 0;
+                }
+            }
+        }
+    }
+    *outlen = total;
+    return LIBUSB_SUCCESS;
+}
+
+/* Read a 32-bit device property value */
+static int read_prop(libusb_device_handle *dev, uint16_t prop, uint32_t *val) {
+    uint8_t buf[256]; int len = 0;
+
+    /* GetDevicePropValue: 0x1015 */
+    uint32_t params[] = {prop};
+    int rc = ptp_send(dev, 0x1015, 1, params);
+    if (rc != LIBUSB_SUCCESS) return rc;
+
+    /* Step 1: Receive DATA container (type=0x0002) with property value */
+    rc = ptp_recv(dev, buf, sizeof(buf), &len);
+    fprintf(stderr, "[DEBUG] read_prop DATA recv: rc=%d len=%d\n", rc, len);
+    if (rc != LIBUSB_SUCCESS || len < 12) return -2;
+    
+    uint16_t dataType = buf[4] | (buf[5] << 8);
+    uint16_t dataCode = buf[6] | (buf[7] << 8);
+    fprintf(stderr, "[DEBUG] DATA type=0x%04X code=0x%04X\n", dataType, dataCode);
+    if (dataType != 0x0002) return -3;  /* Expected DATA container */
+    
+    /* Extract property value from DATA container (after 12-byte header).
+     * IMPORTANT: the payload width varies by property — many Fuji vendor
+     * props (D18C–D1A5 etc.) are UINT16 (2 bytes), not UINT32 (4 bytes).
+     * Previously this only handled len>=16 (4-byte payload), so every
+     * 2-byte (or 1-byte) property silently read back as 0 regardless of
+     * what was actually stored on the camera — this was masking real
+     * property values for the entire preset-slot range. */
+    *val = 0;
+    uint32_t payloadLen = (len > 12) ? (uint32_t)(len - 12) : 0;
+    if (payloadLen >= 4) {
+        *val = buf[12] | (buf[13] << 8) | (buf[14] << 16) | (buf[15] << 24);
+    } else if (payloadLen == 2) {
+        *val = buf[12] | (buf[13] << 8);
+    } else if (payloadLen == 1) {
+        *val = buf[12];
+    }
+    fprintf(stderr, "[DEBUG] property value=0x%08X (payloadLen=%u)\n", *val, payloadLen);
+
+    /* Step 2: Receive RESPONSE container (type=0x0003) */
+    rc = ptp_recv(dev, buf, sizeof(buf), &len);
+    fprintf(stderr, "[DEBUG] read_prop RESP recv: rc=%d len=%d\n", rc, len);
+    if (rc != LIBUSB_SUCCESS || len < 12) return -4;
+    
+    uint16_t respType = buf[4] | (buf[5] << 8);
+    uint16_t respCode = buf[6] | (buf[7] << 8);
+    fprintf(stderr, "[DEBUG] RESP type=0x%04X code=0x%04X\n", respType, respCode);
+    
+    /* Response code is at bytes 6-7, not in params */
+    /* Check if it's a success response (0x2001) */
+    return (respCode == 0x2001) ? 0 : -6;
+}
+
+/* Read a large device property and save to file (e.g., 0xD185 native profile ~625 bytes) */
+static int read_large_prop(libusb_device_handle *dev, uint16_t prop, const char *filePath) {
+    uint32_t params[] = {prop};
+
+    /* Send GetDevicePropValue */
+    int rc = ptp_send(dev, 0x1015, 1, params);
+    if (rc != LIBUSB_SUCCESS) return rc;
+
+    /* Receive DATA container - read first chunk to get length */
+    uint8_t header[64];
+    int len = 0;
+    rc = ptp_recv(dev, header, sizeof(header), &len);
+    if (rc != LIBUSB_SUCCESS || len < 12) return -2;
+
+    uint16_t dataType = header[4] | (header[5] << 8);
+    if (dataType != 0x0002) return -3;  /* Expected DATA */
+
+    uint32_t containerLen = header[0] | (header[1] << 8) | (header[2] << 16) | (header[3] << 24);
+    uint32_t dataLen = containerLen - 12;  /* data after 12-byte header */
+    fprintf(stderr, "[LARGE_PROP] DATA container: total=%u payload=%u\n", containerLen, dataLen);
+
+    /* Allocate buffer for full DATA container */
+    uint8_t *dataBuf = (uint8_t *)malloc(containerLen);
+    if (!dataBuf) return -99;
+    memcpy(dataBuf, header, len);
+
+    /* Read remaining data if needed */
+    while (len < (int)containerLen) {
+        uint8_t *newBuf = (uint8_t *)realloc(dataBuf, containerLen);
+        if (!newBuf) { free(dataBuf); return -99; }
+        dataBuf = newBuf;
+        int chunkLen = 0;
+        rc = ptp_recv(dev, dataBuf + len, (int)(containerLen - len), &chunkLen);
+        if (rc != LIBUSB_SUCCESS) { free(dataBuf); return rc; }
+        len += chunkLen;
+    }
+
+    /* Receive RESPONSE container */
+    uint8_t resp[32];
+    int respLen = 0;
+    rc = ptp_recv(dev, resp, sizeof(resp), &respLen);
+    free(dataBuf);  /* We'll re-read the data below */
+    if (rc != LIBUSB_SUCCESS || respLen < 12) return -4;
+
+    uint16_t respCode = resp[6] | (resp[7] << 8);
+    if (respCode != 0x2001) {
+        fprintf(stderr, "[LARGE_PROP] Response 0x%04X\n", respCode);
+        /* Return distinct code for DeviceBusy so caller can retry */
+        if (respCode == 0x2019) return -201;  /* DeviceBusy — camera still processing */
+        return -6;
+    }
+
+    fprintf(stderr, "[LARGE_PROP] Property 0x%04X: %u bytes → %s\n", prop, dataLen, filePath);
+
+    /* Re-read the property data for file write (simpler than keeping buffer) */
+    /* Actually, we already freed it. Let us redo this properly. */
+    /* Send GetDevicePropValue again */
+    rc = ptp_send(dev, 0x1015, 1, params);
+    if (rc != LIBUSB_SUCCESS) return rc;
+
+    /* Receive DATA container fully */
+    dataBuf = (uint8_t *)malloc(containerLen);
+    if (!dataBuf) return -99;
+    len = 0;
+    rc = ptp_recv(dev, dataBuf, (int)containerLen, &len);
+    if (rc != LIBUSB_SUCCESS) { free(dataBuf); return rc; }
+
+    /* Write payload (skip 12-byte header) to file */
+    FILE *f = fopen(filePath, "wb");
+    if (!f) { free(dataBuf); return -98; }
+    fwrite(dataBuf + 12, 1, dataLen, f);
+    fclose(f);
+    free(dataBuf);
+
+    /* Receive and discard RESPONSE */
+    ptp_recv(dev, resp, sizeof(resp), &respLen);
+
+    fprintf(stderr, "[LARGE_PROP] Written %u bytes to %s\n", dataLen, filePath);
+    return 0;
+}
+
+/* Trigger RAW conversion by setting property 0xD183 */
+/*
+ * X100VI protocol (per FilmKit, tested on X100VI):
+ *   value=0 triggers conversion (both preview and full)
+ *   FilmKit always sends 0 regardless of resolution setting
+ *   rawji (Linux, X-T30/X-T4) uses 1=full, 0=preview — different behavior
+ *
+ * For X100VI compatibility, we always send 0 to match FilmKit exactly.
+ */
+
+/* Build and send a default d185 profile to the camera.
+ * Required before triggering — camera needs conversion parameters.
+ * FilmKit/rawji read from camera and write back. On macOS we can't read
+ * after upload (IN endpoint broken), so we build from scratch.
+ * Based on rawji's fuji_profile.py standard format (632 bytes). */
+static int send_default_profile(libusb_device_handle *dev) {
+    uint8_t profile[632];
+    memset(profile, 0, sizeof(profile));
+
+    /* Header: n_props = 29 */
+    put_u16_le(profile, 29);
+
+    /* IOPCode for X100VI (X-Processor 5): "FF179502" */
+    const char *iocode = "FF179502";
+    profile[2] = (uint8_t)(strlen(iocode) + 1);
+    for (int i = 0; i < (int)strlen(iocode); i++) {
+        put_u16_le(profile + 3 + i * 2, (uint16_t)iocode[i]);
+    }
+
+    /* 29 params at offset 0x201 (513) — defaults from rawji */
+    int off = 0x201;
+    put_u32_le(profile + off, 0x2); off += 4; /* ShootingCondition */
+    put_u32_le(profile + off, 0x7); off += 4; /* FileType */
+    put_u32_le(profile + off, 0x7); off += 4; /* ImageSize L 3:2 */
+    put_u32_le(profile + off, 0x2); off += 4; /* ImageQuality Fine */
+    put_u32_le(profile + off, 0); off += 4;   /* ExposureBias */
+    put_u32_le(profile + off, 0x1); off += 4; /* DynamicRange DR100 */
+    put_u32_le(profile + off, 0); off += 4;   /* WideDRange */
+    put_u32_le(profile + off, 0x1); off += 4; /* FilmSimulation Provia */
+    put_u32_le(profile + off, 0); off += 4;   /* GrainEffect */
+    put_u32_le(profile + off, 0); off += 4;   /* ColorChromeEffect */
+    put_u32_le(profile + off, 0); off += 4;   /* WBShootCond */
+    put_u32_le(profile + off, 0); off += 4;   /* WhiteBalance AsShot */
+    put_u32_le(profile + off, 0); off += 4;   /* WBShiftR */
+    put_u32_le(profile + off, 0); off += 4;   /* WBShiftB */
+    put_u32_le(profile + off, 0); off += 4;   /* WBColorTemp */
+    put_u32_le(profile + off, 0); off += 4;   /* HighlightTone */
+    put_u32_le(profile + off, 0); off += 4;   /* ShadowTone */
+    put_u32_le(profile + off, 0); off += 4;   /* Color */
+    put_u32_le(profile + off, 0); off += 4;   /* Sharpness */
+    put_u32_le(profile + off, 0); off += 4;   /* NoiseReduction */
+    put_u32_le(profile + off, 0); off += 4;   /* Reserved20 */
+    put_u32_le(profile + off, 0); off += 4;   /* ColorSpace */
+    put_u32_le(profile + off, 0); off += 4;   /* HDR */
+    put_u32_le(profile + off, 0); off += 4;   /* SmoothSkinEffect */
+    put_u32_le(profile + off, 0); off += 4;   /* ColorChromeBlue */
+    put_u32_le(profile + off, 0); off += 4;   /* Reserved25 */
+    put_u32_le(profile + off, 0); off += 4;   /* Clarity */
+    put_u32_le(profile + off, 0); off += 4;   /* Reserved27 */
+    put_u32_le(profile + off, 0); off += 4;   /* Reserved28 */
+
+    fprintf(stderr, "[PROFILE] Sending default d185 profile (%d bytes, IOPCode=%s)...\n", (int)sizeof(profile), iocode);
+
+    uint32_t setParam[] = {0xD185};
+    int rc = ptp_send(dev, 0x1016, 1, setParam);
+    if (rc != LIBUSB_SUCCESS) { fprintf(stderr, "[PROFILE] CMD failed: rc=%d\n", rc); return rc; }
+    rc = ptp_send_data(dev, 0x1016, g_transactionId, profile, sizeof(profile));
+    if (rc != LIBUSB_SUCCESS) { fprintf(stderr, "[PROFILE] DATA failed: rc=%d\n", rc); return rc; }
+    uint8_t resp[32]; int rlen = 0;
+    usleep(10000);
+    rc = ptp_recv(dev, resp, sizeof(resp), &rlen);
+    if (rc != LIBUSB_SUCCESS || rlen < 12) { fprintf(stderr, "[PROFILE] RESP failed: rc=%d len=%d\n", rc, rlen); return rc; }
+    uint16_t respCode = resp[6] | (resp[7] << 8);
+    fprintf(stderr, "[PROFILE] Response: 0x%04X\n", respCode);
+    return (respCode == 0x2001) ? 0 : -1;
+}
+
+static int trigger_conversion(libusb_device_handle *dev) {
+    uint8_t data[2];
+    put_u16_le(data, 0);  /* Always 0 — matches FilmKit (X100VI tested) */
+    fprintf(stderr, "[CONVERT] Triggering conversion (value=0, FilmKit protocol)...\n");
+    int rc = write_prop(dev, 0xD183, data, 2);
+    if (rc == 0) {
+        fprintf(stderr, "[CONVERT] Conversion started\n");
+    } else {
+        fprintf(stderr, "[CONVERT] Failed: rc=%d\n", rc);
+    }
+    return rc;
+}
+
+/* Poll for converted JPEG, download to file, delete temp object */
+static int wait_for_result(libusb_device_handle *dev, const char *outPath, int timeoutMs) {
+    uint8_t resp[256];
+    int len = 0;
+    int startMs = 0;  /* We'll track with usleep */
+    int pollCount = 0;
+
+    fprintf(stderr, "[RESULT] Polling for conversion result (timeout=%dms)...\n", timeoutMs);
+
+    while (pollCount * 1000 < timeoutMs) {
+        /* GetObjectHandles: storage=0xFFFFFFFF, format=0x0000, parent=0x00000000 */
+        uint32_t params[] = {0xFFFFFFFF, 0x0000, 0x00000000};
+        int rc = ptp_send(dev, 0x1007, 3, params);
+        if (rc != LIBUSB_SUCCESS) {
+            fprintf(stderr, "[RESULT] GetObjectHandles send failed: rc=%d\n", rc);
+            return rc;
+        }
+
+        /* Receive DATA */
+        len = 0;
+        rc = ptp_recv(dev, resp, sizeof(resp), &len);
+        if (rc != LIBUSB_SUCCESS || len < 12) {
+            fprintf(stderr, "[RESULT] GetObjectHandles DATA failed: rc=%d\n", rc);
+            return rc;
+        }
+        uint16_t dataType = resp[4] | (resp[5] << 8);
+        if (dataType != 0x0002) {
+            fprintf(stderr, "[RESULT] Expected DATA, got 0x%04X\n", dataType);
+            return -3;
+        }
+
+        /* Receive RESPONSE */
+        len = 0;
+        rc = ptp_recv(dev, resp, sizeof(resp), &len);
+        if (rc != LIBUSB_SUCCESS || len < 12) {
+            fprintf(stderr, "[RESULT] GetObjectHandles RESP failed: rc=%d\n", rc);
+            return rc;
+        }
+
+        /* Parse handle count from DATA payload */
+        uint32_t numHandles = 0;
+        if (len >= 16) {
+            numHandles = resp[12] | (resp[13] << 8) | (resp[14] << 16) | (resp[15] << 24);
+        }
+
+        if (numHandles > 0) {
+            /* Extract first handle */
+            uint32_t handle = 0;
+            if (len >= 20) {
+                handle = resp[16] | (resp[17] << 8) | (resp[18] << 16) | (resp[19] << 24);
+            }
+            fprintf(stderr, "[RESULT] Conversion complete! handle=0x%08X\n", handle);
+
+            /* Download JPEG via GetObject */
+            uint32_t getParam[] = {handle};
+            rc = ptp_send(dev, 0x1009, 1, getParam);
+            if (rc != LIBUSB_SUCCESS) {
+                fprintf(stderr, "[RESULT] GetObject send failed: rc=%d\n", rc);
+                return rc;
+            }
+
+            /* Receive DATA container header */
+            uint8_t jpegHeader[64];
+            int jpegLen = 0;
+            rc = ptp_recv(dev, jpegHeader, sizeof(jpegHeader), &jpegLen);
+            if (rc != LIBUSB_SUCCESS || jpegLen < 12) {
+                fprintf(stderr, "[RESULT] GetObject DATA header failed: rc=%d\n", rc);
+                return rc;
+            }
+
+            uint32_t jpegTotalLen = jpegHeader[0] | (jpegHeader[1] << 8) |
+                                     (jpegHeader[2] << 16) | (jpegHeader[3] << 24);
+            uint32_t jpegDataLen = jpegTotalLen - 12;
+            fprintf(stderr, "[RESULT] JPEG size: %u bytes (%.1f MB)\n",
+                    jpegDataLen, jpegDataLen / 1024.0 / 1024.0);
+
+            /* Read full JPEG data */
+            uint8_t *jpegData = (uint8_t *)malloc(jpegTotalLen);
+            if (!jpegData) return -99;
+            memcpy(jpegData, jpegHeader, jpegLen);
+            int totalRecv = jpegLen;
+            while (totalRecv < (int)jpegTotalLen) {
+                uint8_t *newBuf = (uint8_t *)realloc(jpegData, jpegTotalLen);
+                if (!newBuf) { free(jpegData); return -99; }
+                jpegData = newBuf;
+                int chunkLen = 0;
+                rc = ptp_recv(dev, jpegData + totalRecv, (int)(jpegTotalLen - totalRecv), &chunkLen);
+                if (rc != LIBUSB_SUCCESS) { free(jpegData); return rc; }
+                totalRecv += chunkLen;
+            }
+
+            /* Write JPEG to file */
+            FILE *f = fopen(outPath, "wb");
+            if (!f) { free(jpegData); return -98; }
+            fwrite(jpegData + 12, 1, jpegDataLen, f);
+            fclose(f);
+            free(jpegData);
+
+            /* Receive and discard RESPONSE */
+            ptp_recv(dev, resp, sizeof(resp), &len);
+
+            /* Delete temp object */
+            fprintf(stderr, "[RESULT] Cleaning up temp object...\n");
+            uint32_t delParam[] = {handle};
+            rc = ptp_send(dev, 0x100B, 1, delParam);
+            if (rc == LIBUSB_SUCCESS) {
+                ptp_recv(dev, resp, sizeof(resp), &len);  /* discard response */
+            }
+
+            fprintf(stderr, "[RESULT] JPEG saved to %s\n", outPath);
+            return (int)jpegDataLen;
+        }
+
+        /* No result yet, wait 1 second and poll again */
+        pollCount++;
+        fprintf(stderr, "[RESULT] Poll %d: no result yet...\n", pollCount);
+        usleep(1000000);  /* 1 second */
+    }
+
+    fprintf(stderr, "[RESULT] Timeout after %d seconds\n", timeoutMs / 1000);
+    return -97;  /* Timeout */
+}
+
+/* Write a uint16 property value (helper wrapper) */
+static int write_prop_u16(libusb_device_handle *dev, uint16_t prop, uint16_t val) {
+    uint8_t data[2] = { val & 0xFF, (val >> 8) & 0xFF };
+    return write_prop(dev, prop, data, 2);
+}
+
+/* Write a uint32 property value (helper wrapper) */
+static int write_prop_u32(libusb_device_handle *dev, uint16_t prop, uint32_t val) {
+    uint8_t data[4] = { val & 0xFF, (val >> 8) & 0xFF, (val >> 16) & 0xFF, (val >> 24) & 0xFF };
+    return write_prop(dev, prop, data, 4);
+}
+
+/* Write a property value (three-phase: COMMAND, DATA, RESPONSE) */
+static int write_prop(libusb_device_handle *dev, uint16_t prop, uint8_t *data, uint32_t dataLen) {
+    uint8_t resp[64]; int len = 0;
+    uint32_t params[] = {prop};
+
+    /* SetDevicePropValue: 0x1016 - three-phase write */
+    /* Phase 1: Send COMMAND container */
+    int rc = ptp_send(dev, 0x1016, 1, params);
+    fprintf(stderr, "[DEBUG] write_prop CMD: rc=%d\n", rc);
+    if (rc != LIBUSB_SUCCESS) return -10;
+
+    /* Phase 2: Send DATA container (same transaction ID as COMMAND).
+     * PTP DATA containers have NO parameters — just a 12-byte header
+     * (length+type+code+transid) followed directly by the raw payload.
+     * (Previously this incorrectly reserved 4 extra bytes as if for a
+     * parameter, which shifted the real property value out of the
+     * container the camera actually parses — likely root cause of
+     * D18C/other property writes being silently ignored or rejected.) */
+    uint8_t dataContainer[64];
+    uint32_t headerLen = 12;  /* DATA containers carry no params */
+    uint32_t totalLen = headerLen + dataLen;
+    memset(dataContainer, 0, sizeof(dataContainer));
+    put_u32_le(dataContainer, totalLen);
+    put_u16_le(dataContainer + 4, 0x0002);  /* type: Data */
+    put_u16_le(dataContainer + 6, 0x1016);  /* code */
+    /* Use SAME transaction ID as COMMAND (don't increment) */
+    put_u32_le(dataContainer + 8, g_transactionId);
+    memcpy(dataContainer + headerLen, data, dataLen);
+
+    int transferred = 0;
+    fprintf(stderr, "[DEBUG] write_prop DATA: totalLen=%u transId=%u\n", totalLen, g_transactionId);
+    rc = libusb_bulk_transfer(dev, 0x01, dataContainer, totalLen, &transferred, 5000);
+    fprintf(stderr, "[DEBUG] write_prop DATA sent: rc=%d transferred=%d\n", rc, transferred);
+    if (rc != LIBUSB_SUCCESS) return -11;
+
+    /* Phase 3: Receive RESPONSE container */
+    rc = ptp_recv(dev, resp, sizeof(resp), &len);
+    if (rc != LIBUSB_SUCCESS) return rc;
+    if (len < 12) return -2;
+
+    uint16_t type = resp[4] | (resp[5] << 8);
+    uint16_t code = resp[6] | (resp[7] << 8);
+    fprintf(stderr, "[DEBUG] write_prop RESP: type=0x%04X code=0x%04X\n", type, code);
+    if (type != 0x0003) return -3;  /* Expected Response */
+
+    return (code == 0x2001) ? 0 : -4;
+}
+
+/* Reset USB connection to recover from stalled device */
+static int reset_device(libusb_device_handle *dev) {
+    fprintf(stderr, "[HELPER] Resetting USB connection...\n");
+    libusb_release_interface(dev, 0);
+    libusb_close(dev);
+    return -99;  /* Signal that dev needs full reconnect */
+}
+
+/* ── Connection Helpers (for reconnect) ─────────────────────────────── */
+
+/* Forward declarations for connect/disconnect helpers */
+static int do_open_device(libusb_context *ctx, libusb_device_handle **dev);
+static void do_close_device(libusb_device_handle **dev);
+
+/* Open device, claim interface, send OpenSession — reusable for connect/reconnect */
+static int do_open_device(libusb_context *ctx, libusb_device_handle **dev) {
+    libusb_device_handle *h = libusb_open_device_with_vid_pid(ctx, FUJI_VENDOR, X100VI_PRODUCT);
+    if (!h) return -1;
+
+    /* Get device info */
+    struct libusb_device_descriptor desc;
+    if (libusb_get_device_descriptor(libusb_get_device(h), &desc) == LIBUSB_SUCCESS) {
+        char vendor[256]={0}, product[256]={0}, serial[256]={0};
+        libusb_get_string_descriptor_ascii(h, desc.iManufacturer, (unsigned char*)vendor, sizeof(vendor));
+        libusb_get_string_descriptor_ascii(h, desc.iProduct, (unsigned char*)product, sizeof(product));
+        libusb_get_string_descriptor_ascii(h, desc.iSerialNumber, (unsigned char*)serial, sizeof(serial));
+        fprintf(stderr, "[HELPER] Found: %s %s (SN: %s)\n", vendor, product, serial);
+    }
+
+    /* Prepare USB connection */
+    libusb_detach_kernel_driver(h, 0);
+    libusb_set_configuration(h, 1);
+    int rc = libusb_claim_interface(h, 0);
+    if (rc != LIBUSB_SUCCESS) {
+        fprintf(stderr, "[HELPER] Failed to claim interface: %s\n", libusb_error_name(rc));
+        libusb_close(h);
+        return -2;
+    }
+
+    /* Clear endpoint halts after fresh connection (macOS libusb quirk) */
+    clear_endpoint_halt(h, 0x81);
+    clear_endpoint_halt(h, 0x01);
+    usleep(100000);  /* 100ms settle after clear */
+
+    /* OpenSession is required — send it and ignore response */
+    fprintf(stderr, "[HELPER] Sending OpenSession (required by camera)...\n");
+    uint8_t sessResp[256]; int sessLen = 0;
+    uint32_t sessParam = ++g_transactionId;
+    uint32_t cmdLen = 12 + 1 * 4;
+    uint8_t cmdBuf[32];
+    memset(cmdBuf, 0, sizeof(cmdBuf));
+    put_u32_le(cmdBuf, cmdLen);
+    put_u16_le(cmdBuf + 4, 0x0001);
+    put_u16_le(cmdBuf + 6, 0x1002);
+    put_u32_le(cmdBuf + 8, sessParam);
+    int transferred = 0;
+    rc = libusb_bulk_transfer(h, 0x01, cmdBuf, (int)cmdLen, &transferred, 5000);
+    if (rc == LIBUSB_SUCCESS) {
+        rc = ptp_recv(h, sessResp, sizeof(sessResp), &sessLen);
+        if (rc == LIBUSB_SUCCESS && sessLen >= 12) {
+            uint16_t sessRespType = sessResp[4] | (sessResp[5] << 8);
+            uint16_t sessRespCode = sessResp[6] | (sessResp[7] << 8);
+            fprintf(stderr, "[HELPER] OpenSession response: type=0x%04X code=0x%04X\n", sessRespType, sessRespCode);
+        }
+    }
+
+    *dev = h;
+    return 0;
+}
+
+/* Close device and release interface */
+static void do_close_device(libusb_device_handle **dev) {
+    if (*dev) {
+        libusb_release_interface(*dev, 0);
+        libusb_close(*dev);
+        *dev = NULL;
+    }
+}
+
+/* ── Command Parsing ─────────────────────────────────────────────────── */
+
+/* Simple JSON string value extractor */
+static const char *json_get_string(const char *json, const char *key) {
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return NULL;
+    p += strlen(pattern);
+    while (*p == ' ' || *p == ':') p++;
+    if (*p != '"') return NULL;
+    p++;
+    const char *end = strchr(p, '"');
+    if (!end) return NULL;
+    /* Return a copy since we can't guarantee the original stays alive */
+    static char buf[1024];
+    int len = (int)(end - p);
+    if (len >= (int)sizeof(buf)) len = sizeof(buf) - 1;
+    memcpy(buf, p, len);
+    buf[len] = 0;
+    return buf;
+}
+
+static int json_get_int(const char *json, const char *key, int def) {
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return def;
+    p += strlen(pattern);
+    while (*p == ' ' || *p == ':') p++;
+    if ((*p >= '0' && *p <= '9') || *p == '-') {
+        return atoi(p);
+    }
+    return def;
+}
+
+/* ── Main Loop ───────────────────────────────────────────────────────── */
+
+int main(int argc, char *argv[]) {
+    libusb_context *ctx = NULL;
+    libusb_device_handle *dev = NULL;
+    int rc;
+
+    /* Init libusb */
+    rc = libusb_init(&ctx);
+    if (rc != LIBUSB_SUCCESS) {
+        fprintf(stderr, "libusb_init failed: %s\n", libusb_error_name(rc));
+        return 1;
+    }
+    libusb_set_debug(ctx, 0);
+
+    /* Main command loop */
+    char line[4096];
+    while (fgets(line, sizeof(line), stdin)) {
+        /* Trim newline */
+        size_t len = strlen(line);
+        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
+            line[--len] = 0;
+        if (len == 0) continue;
+
+        const char *cmd = json_get_string(line, "command");
+        if (!cmd) {
+            fprintf(stdout, "{\"id\":\"error\",\"success\":false,\"error\":\"missing_command\"}\n");
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── ping ── */
+        if (!strcmp(cmd, "ping")) {
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":\"ok\"}\n",
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── connect ── */
+        if (!strcmp(cmd, "connect")) {
+            if (dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"already_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+
+            fprintf(stderr, "[HELPER] Connecting...\n");
+            rc = do_open_device(ctx, &dev);
+            if (rc != 0) {
+                const char *errMsg = rc == -1 ? "camera_not_found" : "interface_claim_failed";
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"%s\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", errMsg);
+                fflush(stdout);
+                continue;
+            }
+
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":\"connected\"}\n",
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── reconnect ──
+         * Close and reopen the USB connection. Workaround for macOS libusb
+         * IN endpoint breakage after large vendor transfers (RAF upload).
+         * After reconnect, the PTP session is fresh but camera state
+         * (loaded RAF) persists in the camera's memory.
+         */
+        if (!strcmp(cmd, "reconnect")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+
+            fprintf(stderr, "[HELPER] Reconnecting (close → open → OpenSession)...\n");
+            do_close_device(&dev);
+
+            /* Pause to let macOS USB stack settle after large vendor transfer */
+            usleep(500000);  /* 500ms — macOS needs more time */
+
+            rc = do_open_device(ctx, &dev);
+            if (rc != 0) {
+                const char *errMsg = rc == -1 ? "camera_not_found" : "interface_claim_failed";
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"reconnect_%s\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", errMsg);
+                fflush(stdout);
+                continue;
+            }
+
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":\"reconnected\"}\n",
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── disconnect ── */
+        if (!strcmp(cmd, "disconnect")) {
+            if (dev) {
+                libusb_release_interface(dev, 0);
+                libusb_close(dev);
+                dev = NULL;
+            }
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":\"disconnected\"}\n",
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── read_property ── */
+        if (!strcmp(cmd, "read_property")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            uint16_t prop = (uint16_t)json_get_int(line, "code", 0);
+            uint32_t val = 0;
+            rc = read_prop(dev, prop, &val);
+            const char *r = NULL;
+            /* Try to resolve the value */
+            for (int i = 0; preset_props[i].code; i++) {
+                if (preset_props[i].code == prop) { r = resolve(preset_props[i].key, val); break; }
+            }
+            for (int i = 0; active_props[i].code; i++) {
+                if (active_props[i].code == prop) { r = resolve(active_props[i].key, val); break; }
+            }
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":%s,\"result\":{\"code\":%u,\"value\":%u",
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0",
+                    rc == 0 ? "true" : "false", prop, val);
+            if (r) fprintf(stdout, ",\"display\":\"%s\"", r);
+            if (rc != 0) fprintf(stdout, ",\"error_code\":%d", rc);
+            fprintf(stdout, "}}\n");
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── write_property ── */
+        if (!strcmp(cmd, "write_property")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            uint16_t prop = (uint16_t)json_get_int(line, "code", 0);
+            uint32_t val = (uint32_t)json_get_int(line, "value", 0);
+            rc = write_prop_u32(dev, prop, val);
+            if (rc == 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":\"ok\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            } else {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"write_failed\",\"code\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc);
+            }
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── read_preset_slot ── */
+        if (!strcmp(cmd, "read_preset_slot")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            int slot = json_get_int(line, "index", 0);
+            /* Select the slot. Confirmed by direct camera testing: D18C
+             * only accepts a 4-byte (UINT32) write — a 2-byte write is
+             * rejected with 0x201C (InvalidDevicePropValue) for most
+             * values even though it silently "succeeds" for some. */
+            int slotSelRc = write_prop_u32(dev, 0xD18C, (uint32_t)slot);
+            if (slotSelRc != 0) {
+                fprintf(stderr, "[WARN] D18C slot select failed: rc=%d\n", slotSelRc);
+            }
+            usleep(100000);  /* 100ms for camera to switch slot (matches FilmKit) */
+
+            /* Read all preset properties */
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":{\"slot\":%d,\"slot_select_rc\":%d,\"properties\":{",
+
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0", slot, slotSelRc);
+            bool first = true;
+            for (int i = 0; preset_props[i].code; i++) {
+                uint32_t val = 0;
+                int r = read_prop(dev, preset_props[i].code, &val);
+                if (!first) fprintf(stdout, ",");
+                first = false;
+                fprintf(stdout, "\"0x%04X_%s\":{\"rc\":%d,\"raw\":%u",
+                        preset_props[i].code, preset_props[i].name, r, val);
+                if (r == 0) {
+                    const char *display = resolve(preset_props[i].key, val);
+                    if (display) fprintf(stdout, ",\"display\":\"%s\"", display);
+                }
+                fprintf(stdout, "}");
+            }
+            fprintf(stdout, "}}\n");
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── write_preset_slot ── */
+        if (!strcmp(cmd, "write_preset_slot")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            int slot = json_get_int(line, "index", 0);
+            /* Select the slot (4-byte write — see read_preset_slot note). */
+            int slotSelRc = write_prop_u32(dev, 0xD18C, (uint32_t)slot);
+            if (slotSelRc != 0) {
+                fprintf(stderr, "[WARN] D18C slot select failed: rc=%d\n", slotSelRc);
+            }
+            usleep(100000);  /* 100ms for camera to switch slot (matches FilmKit) */
+
+            /* Write properties from JSON */
+            const char *name = json_get_string(line, "name");
+            if (name && strlen(name) > 0) {
+                /* Write name as string - needs special handling */
+                /* For now, skip string writes (complex encoding) */
+                fprintf(stderr, "[HELPER] String write not yet implemented: %s\n", name);
+            }
+
+            /* Write numeric properties */
+            uint16_t code;
+            uint32_t val;
+
+            code = (uint16_t)json_get_int(line, "film_simulation", -1);
+            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "film_simulation", 0); write_prop_u32(dev, 0xD192, val); }
+
+            code = (uint16_t)json_get_int(line, "dynamic_range", -1);
+            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "dynamic_range", 0); write_prop_u32(dev, 0xD190, val); }
+
+            code = (uint16_t)json_get_int(line, "grain_effect", -1);
+            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "grain_effect", 0); write_prop_u32(dev, 0xD195, val); }
+
+            code = (uint16_t)json_get_int(line, "color_chrome", -1);
+            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "color_chrome", 0); write_prop_u32(dev, 0xD196, val); }
+
+            code = (uint16_t)json_get_int(line, "white_balance", -1);
+            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "white_balance", 0); write_prop_u32(dev, 0xD199, val); }
+
+            code = (uint16_t)json_get_int(line, "sharpness", -1);
+            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "sharpness", 0); write_prop_u32(dev, 0xD1A0, val); }
+
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":\"ok\"}\n",
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── sleep ── */
+        if (!strcmp(cmd, "sleep")) {
+            int ms = json_get_int(line, "ms", 100);
+            fprintf(stderr, "[HELPER] Sleeping %dms...\n", ms);
+            usleep(ms * 1000);
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":true}\n",
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── test_vendor ── */
+        if (!strcmp(cmd, "test_vendor")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            const char *op = json_get_string(line, "op");
+            uint16_t vendorCode = 0x902B;
+            int cmdParamCount = 0;
+            uint32_t cmdParams[5] = {0};
+            const uint8_t *testData = NULL;
+            uint32_t testDataLen = 0;
+            int timeoutMs = 10000;
+
+            if (op) {
+                if (!strcmp(op, "tether_open")) {
+                    vendorCode = 0x902B;
+                    cmdParamCount = 1;
+                    cmdParams[0] = 1;
+                } else if (!strcmp(op, "send_object_info")) {
+                    vendorCode = 0x900C;
+                    cmdParamCount = 3;
+                    cmdParams[0] = 0; cmdParams[1] = 0; cmdParams[2] = 0;
+                    /* Minimal ObjectInfo for testing */
+                    uint8_t minObjInfo[16];
+                    memset(minObjInfo, 0, sizeof(minObjInfo));
+                    put_u32_le(minObjInfo, 0);  /* StorageID */
+                    put_u16_le(minObjInfo + 4, 0xF802);  /* ObjectFormat: RAF */
+                    put_u16_le(minObjInfo + 6, 0);  /* ProtectionStatus */
+                    put_u32_le(minObjInfo + 8, 0);  /* CompressedSize */
+                    testData = minObjInfo;
+                    testDataLen = 16;
+                } else {
+                    fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"unknown_vendor_op:%s\"}\n",
+                            json_get_string(line, "id") ? json_get_string(line, "id") : "0", op);
+                    fflush(stdout);
+                    continue;
+                }
+            }
+
+            /* Empty data for tether_open */
+            if (!testData) {
+                static uint8_t emptyData[1];
+                testData = emptyData;
+                testDataLen = 0;
+            }
+
+            int rc = send_vendor_command(dev, vendorCode, cmdParamCount, cmdParams, testData, testDataLen, timeoutMs);
+            const char *status = "ok";
+            if (rc == -100) status = "endpoint_stall_OUT";
+            else if (rc == -101) status = "endpoint_stall_IN";
+            else if (rc < 0 && rc > -100) status = "protocol_error";
+            else if (rc > 0x2000) status = "camera_error";
+            else if (rc != 0) status = "transfer_error";
+
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":%s,\"result\":{\"code\":\"0x%04X\",\"rc\":%d,\"status\":\"%s\"}}\n",
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0",
+                    rc == 0 ? "true" : "false",
+                    vendorCode, rc, status);
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── load_raf ── */
+        if (!strcmp(cmd, "load_raf")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            const char *filePath = json_get_string(line, "path");
+            if (!filePath || strlen(filePath) == 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"missing_file_path\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+
+            /* Read RAF file */
+            FILE *f = fopen(filePath, "rb");
+            if (!f) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"file_not_found\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            fseek(f, 0, SEEK_END);
+            long fileSize = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            uint8_t *rafData = (uint8_t *)malloc(fileSize);
+            if (!rafData) {
+                fclose(f);
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"out_of_memory\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            fread(rafData, 1, fileSize, f);
+            fclose(f);
+            uint32_t rafSize = (uint32_t)fileSize;
+            fprintf(stderr, "[HELPER] RAF file: %s (%.1f MB)\n", filePath, rafSize / 1024.0 / 1024.0);
+
+            /* Build ObjectInfo structure (matches FilmKit/rawji format exactly) */
+            uint8_t objectInfo[256];
+            memset(objectInfo, 0, sizeof(objectInfo));
+            int off = 0;
+            put_u32_le(objectInfo + off, 0); off += 4;          /* StorageID */
+            put_u16_le(objectInfo + off, 0xF802); off += 2;    /* ObjectFormat: RAF */
+            put_u16_le(objectInfo + off, 0); off += 2;         /* ProtectionStatus */
+            put_u32_le(objectInfo + off, rafSize); off += 4;   /* CompressedSize */
+            put_u16_le(objectInfo + off, 0); off += 2;         /* ThumbFormat */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ThumbCompressedSize */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ThumbPixWidth */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ThumbPixHeight */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ImagePixWidth */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ImagePixHeight */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ImageBitDepth */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ParentObject */
+            put_u16_le(objectInfo + off, 0); off += 2;         /* AssociationType */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* AssociationDesc */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* SequenceNumber */
+            /* Filename: FUP_FILE.dat (PTP string: 1-byte char count + UCS-2LE) */
+            const char *fname = "FUP_FILE.dat";
+            uint8_t fnameLen = 12 + 1;  /* length including null terminator */
+            objectInfo[off++] = fnameLen;
+            for (int i = 0; i <= 12; i++) {
+                uint16_t ch = (i < 12) ? (uint16_t)fname[i] : 0;
+                put_u16_le(objectInfo + off, ch); off += 2;
+            }
+            /* CaptureDate, ModificationDate, Keywords (empty) */
+            objectInfo[off++] = 0;  /* CaptureDate */
+            objectInfo[off++] = 0;  /* ModificationDate */
+            objectInfo[off++] = 0;  /* Keywords */
+            uint32_t objectInfoLen = (uint32_t)off;
+            fprintf(stderr, "[HELPER] ObjectInfo: %u bytes\n", objectInfoLen);
+
+            /* Step 1: Send ObjectInfo via Fuji vendor command 0x900C */
+            fprintf(stderr, "[HELPER] Sending ObjectInfo (0x900C)...\n");
+            uint32_t infoParams[] = {0, 0, 0};  /* storage_id, handle, 0 */
+            int rc = send_vendor_command(dev, 0x900C, 3, infoParams, objectInfo, objectInfoLen, 30000);
+            if (rc != 0) {
+                const char *stallMsg = rc == -100 ? "OUT endpoint stalled" :
+                                       rc == -101 ? "IN endpoint stalled" :
+                                       rc > 0x2000 ? "camera rejected" : "transfer failed";
+                fprintf(stderr, "[HELPER] SendObjectInfo failed: rc=%d (%s)\n", rc, stallMsg);
+                free(rafData);
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"send_object_info_failed\",\"rc\":%d,\"detail\":\"%s\"}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc, stallMsg);
+                fflush(stdout);
+                continue;
+            }
+            fprintf(stderr, "[HELPER] ObjectInfo sent OK\n");
+
+            /* Step 2: Send RAF data via Fuji vendor command 0x900D */
+            fprintf(stderr, "[HELPER] Sending RAF data (0x900D)...\n");
+            rc = send_vendor_command(dev, 0x900D, 0, NULL, rafData, rafSize, 60000);
+            free(rafData);
+            if (rc != 0) {
+                const char *stallMsg = rc == -100 ? "OUT endpoint stalled" :
+                                       rc == -101 ? "IN endpoint stalled" :
+                                       rc > 0x2000 ? "camera rejected" : "transfer failed";
+                fprintf(stderr, "[HELPER] SendObject2 failed: rc=%d (%s)\n", rc, stallMsg);
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"send_object_failed\",\"rc\":%d,\"detail\":\"%s\"}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc, stallMsg);
+                fflush(stdout);
+                continue;
+            }
+            /*
+             * Post-upload delay — give camera time to process the file.
+             * FilmKit (X100VI tested) has no explicit delay but WebUSB
+             * introduces natural latency. libusb is faster; the camera
+             * may reject commands if sent too soon after upload.
+             *
+             * Previously: clear_endpoint_halt(0x81) + 100ms — this confused
+             * the camera's state machine (DeviceBusy after upload).
+             * Now: just wait, then reconnect handles endpoint recovery.
+             */
+            usleep(1000000);  /* 1s — let camera finish processing RAF */
+            fprintf(stderr, "[HELPER] RAF data sent OK — file loaded\n");
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":{\"status\":\"raf_loaded\",\"size\":%u}}\n",
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0", rafSize);
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── get_profile ── */
+        if (!strcmp(cmd, "get_profile")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            const char *outPath = json_get_string(line, "output");
+            if (!outPath || strlen(outPath) == 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"missing_output_path\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            int rc = read_large_prop(dev, 0xD185, outPath);
+            if (rc == 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":{\"status\":\"profile_read\",\"path\":\"%s\"}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", outPath);
+            } else {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"profile_read_failed\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc);
+            }
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── set_profile ──
+         * Write native profile (0xD185) from file. Used after read/modify.
+         * The profile is ~625 bytes of raw binary data.
+         */
+        if (!strcmp(cmd, "set_profile")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            const char *profPath = json_get_string(line, "path");
+            if (!profPath || strlen(profPath) == 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"missing_path\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+
+            FILE *f = fopen(profPath, "rb");
+            if (!f) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"file_not_found\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            fseek(f, 0, SEEK_END);
+            long profSize = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            uint8_t *profData = (uint8_t *)malloc(profSize);
+            fread(profData, 1, profSize, f);
+            fclose(f);
+
+            fprintf(stderr, "[PROFILE] Writing 0xD185 profile: %ld bytes\n", profSize);
+
+            /* SetDevicePropValue: COMMAND */
+            uint32_t setParam[] = {0xD185};
+            int rc = ptp_send(dev, 0x1016, 1, setParam);
+            if (rc != LIBUSB_SUCCESS) {
+                free(profData);
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"cmd_send_failed\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc);
+                fflush(stdout);
+                continue;
+            }
+
+            /* DATA container with profile bytes */
+            rc = ptp_send_data(dev, 0x1016, g_transactionId, profData, (uint32_t)profSize);
+            free(profData);
+            if (rc != LIBUSB_SUCCESS) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"data_send_failed\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc);
+                fflush(stdout);
+                continue;
+            }
+
+            /* RESPONSE */
+            uint8_t resp[32]; int rlen = 0;
+            usleep(10000);
+            rc = ptp_recv(dev, resp, sizeof(resp), &rlen);
+            if (rc != LIBUSB_SUCCESS || rlen < 12) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"resp_failed\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc);
+                fflush(stdout);
+                continue;
+            }
+
+            uint16_t respCode = resp[6] | (resp[7] << 8);
+            if (respCode == 0x2001) {
+                fprintf(stderr, "[PROFILE] Profile written successfully\n");
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":{\"status\":\"profile_set\",\"bytes\":%ld}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", profSize);
+            } else {
+                fprintf(stderr, "[PROFILE] Response 0x%04X\n", respCode);
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"camera_rejected\",\"code\":\"0x%04X\"}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", respCode);
+            }
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── trigger_conversion ── */
+        if (!strcmp(cmd, "trigger_conversion")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            int fullRes = json_get_int(line, "full_resolution", 1);
+            /* X100VI always uses value=0 (FilmKit protocol), ignore fullRes param */
+            (void)fullRes;
+            int rc = trigger_conversion(dev);
+            if (rc == 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":{\"status\":\"conversion_started\"}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            } else {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"trigger_failed\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc);
+            }
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── wait_result ── */
+        if (!strcmp(cmd, "wait_result")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            const char *outPath = json_get_string(line, "output");
+            if (!outPath || strlen(outPath) == 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"missing_output_path\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            int timeoutMs = json_get_int(line, "timeout_ms", 30000);
+            int jpegSize = wait_for_result(dev, outPath, timeoutMs);
+            if (jpegSize > 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":{\"status\":\"jpeg_downloaded\",\"path\":\"%s\",\"size\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", outPath, jpegSize);
+            } else {
+                const char *errMsg = jpegSize == -97 ? "timeout" : "download_failed";
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"%s\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", errMsg, jpegSize);
+            }
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── convert_raf ── */
+        /* Full pipeline: load RAF → get profile → set profile → trigger → wait → done */
+        if (!strcmp(cmd, "convert_raf")) {
+            if (!dev) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"not_connected\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            const char *rafPath = json_get_string(line, "input");
+            char rafPathBuf[512];
+            snprintf(rafPathBuf, sizeof(rafPathBuf), "%s", rafPath ? rafPath : "");
+            const char *jpegPath = json_get_string(line, "output");
+            char jpegPathBuf[512];
+            snprintf(jpegPathBuf, sizeof(jpegPathBuf), "%s", jpegPath ? jpegPath : "");
+            if (strlen(rafPathBuf) == 0 || strlen(jpegPathBuf) == 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"missing_input_or_output\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+
+            fprintf(stderr, "[PIPELINE] Starting RAF conversion: %s → %s\n", rafPathBuf, jpegPathBuf);
+
+            /* Step 1: Load RAF */
+            FILE *rafFile = fopen(rafPathBuf, "rb");
+            if (!rafFile) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"file_not_found\"}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+                fflush(stdout);
+                continue;
+            }
+            fseek(rafFile, 0, SEEK_END);
+            long rafSizeLong = ftell(rafFile);
+            fseek(rafFile, 0, SEEK_SET);
+            uint32_t rafSize = (uint32_t)rafSizeLong;
+            uint8_t *rafData = (uint8_t *)malloc(rafSize);
+            fread(rafData, 1, rafSize, rafFile);
+            fclose(rafFile);
+
+            /* Build ObjectInfo (matches load_raf exactly — 82 bytes) */
+            uint8_t objectInfo[256];
+            memset(objectInfo, 0, sizeof(objectInfo));
+            int off = 0;
+            put_u32_le(objectInfo + off, 0); off += 4;          /* StorageID */
+            put_u16_le(objectInfo + off, 0xF802); off += 2;    /* ObjectFormat: RAF */
+            put_u16_le(objectInfo + off, 0); off += 2;         /* ProtectionStatus */
+            put_u32_le(objectInfo + off, rafSize); off += 4;   /* CompressedSize */
+            put_u16_le(objectInfo + off, 0); off += 2;         /* ThumbFormat */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ThumbCompressedSize */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ThumbPixWidth */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ThumbPixHeight */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ImagePixWidth */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ImagePixHeight */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ImageBitDepth */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* ParentObject */
+            put_u16_le(objectInfo + off, 0); off += 2;         /* AssociationType */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* AssociationDesc */
+            put_u32_le(objectInfo + off, 0); off += 4;         /* SequenceNumber */
+            /* Filename: FUP_FILE.dat (PTP string: 1-byte char count + UCS-2LE) */
+            const char *fname = "FUP_FILE.dat";
+            uint8_t fnameLen = 12 + 1;  /* length including null terminator */
+            objectInfo[off++] = fnameLen;
+            for (int i = 0; i <= 12; i++) {
+                uint16_t ch = (i < 12) ? (uint16_t)fname[i] : 0;
+                put_u16_le(objectInfo + off, ch); off += 2;
+            }
+            /* CaptureDate, ModificationDate, Keywords (empty) */
+            objectInfo[off++] = 0;  /* CaptureDate */
+            objectInfo[off++] = 0;  /* ModificationDate */
+            objectInfo[off++] = 0;  /* Keywords */
+            uint32_t objectInfoLen = (uint32_t)off;
+
+            /* Send ObjectInfo */
+            fprintf(stderr, "[PIPELINE] Step 1: Send ObjectInfo...\n");
+            uint32_t infoParams[] = {0, 0, 0};
+            int rc = send_vendor_command(dev, 0x900C, 3, infoParams, objectInfo, objectInfoLen, 30000);
+            if (rc != 0) {
+                free(rafData);
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"send_object_info_failed\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc);
+                fflush(stdout);
+                continue;
+            }
+
+            /* Send RAF data */
+            fprintf(stderr, "[PIPELINE] Step 2: Send RAF data...\n");
+            rc = send_vendor_command(dev, 0x900D, 0, NULL, rafData, rafSize, 60000);
+            free(rafData);
+            if (rc != 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"send_raf_failed\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc);
+                fflush(stdout);
+                continue;
+            }
+            fprintf(stderr, "[PIPELINE] RAF loaded\n");
+
+            /* ── Reconnect after large vendor transfer ──
+             * macOS libusb IN endpoint breaks after 83MB vendor transfer.
+             * Reconnect restores the USB stack. Camera state (loaded RAF)
+             * persists across reconnections.
+             * On Linux/WebUSB this is a no-op cost (~300ms) but necessary
+             * for macOS compatibility.
+             */
+            fprintf(stderr, "[PIPELINE] Reconnecting after RAF upload...\n");
+            do_close_device(&dev);
+            usleep(2000000);  /* 2s — camera needs time after large transfer */
+            rc = do_open_device(ctx, &dev);
+            if (rc != 0) {
+                const char *errMsg = rc == -1 ? "camera_not_found" : "interface_claim_failed";
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"reconnect_%s\"}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", errMsg);
+                fflush(stdout);
+                continue;
+            }
+            /* Settle delay after reconnect — camera needs time before accepting commands */
+            usleep(2000000);  /* 2s settle after fresh connection */
+            fprintf(stderr, "[PIPELINE] Reconnected (settled)\n");
+
+            /* Step 3: Send default profile (can't read from camera on macOS after upload)
+             * FilmKit/rawji: getProfile → setProfile → trigger
+             * We build a valid default profile from scratch (rawji standard format) */
+            fprintf(stderr, "[PIPELINE] Step 3: Send default profile...\n");
+            rc = send_default_profile(dev);
+            if (rc != 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"set_profile_failed\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc);
+                fflush(stdout);
+                continue;
+            }
+
+            /* Step 4: Trigger conversion (value=0 per FilmKit/X100VI) */
+            fprintf(stderr, "[PIPELINE] Step 4: Trigger conversion...\n");
+            rc = trigger_conversion(dev);
+            if (rc != 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"trigger_failed\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", rc);
+                fflush(stdout);
+                continue;
+            }
+
+            /* Step 6: Wait for result (give camera a moment before first poll) */
+            fprintf(stderr, "[PIPELINE] Step 6: Wait for JPEG...\n");
+            usleep(2000000);  /* 2s — camera needs time to start processing */
+            int jpegSize = wait_for_result(dev, jpegPathBuf, 30000);
+            if (jpegSize > 0) {
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":{\"status\":\"conversion_complete\",\"path\":\"%s\",\"size\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", jpegPathBuf, jpegSize);
+            } else {
+                const char *errMsg = jpegSize == -97 ? "timeout" : "download_failed";
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"error\":\"%s\",\"rc\":%d}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", errMsg, jpegSize);
+            }
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── exit ── */
+        if (!strcmp(cmd, "exit")) {
+            if (dev) {
+                libusb_release_interface(dev, 0);
+                libusb_close(dev);
+                dev = NULL;
+            }
+            libusb_exit(ctx);
+            exit(0);
+        }
+
+        /* Unknown command */
+        fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"unknown_command:%s\"}\n",
+                json_get_string(line, "id") ? json_get_string(line, "id") : "0", cmd);
+        fflush(stdout);
+    }
+
+    /* Cleanup */
+    if (dev) {
+        libusb_release_interface(dev, 0);
+        libusb_close(dev);
+    }
+    libusb_exit(ctx);
+    return 0;
+}

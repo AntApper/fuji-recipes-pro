@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<workspace version="10.0">
+  <file ref="FujiRecipesCore/FujiRecipesCore.xcodeproj" location="self:1">
+  </file>
+  <file ref="FujiPTPClient/FujiPTPClient.xcodeproj" location="self:2">
+  </file>
+  <file ref="FujiRecipes/iOS/FujiRecipes.xcodeproj" location="self:3">
+  </file>
+  <file ref="FujiRecipesMac/macos/FujiRecipesMac.xcodeproj" location="self:4">
+  </file>
+</workspace>

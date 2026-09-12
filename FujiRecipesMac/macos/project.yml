@@ -1,0 +1,49 @@
+name: FujiRecipesMac
+options:
+  bundleIdPrefix: com.ant
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  generateLastUpgradeCheck: "1500"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ENABLE_BITCODE: NO
+    LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @loader_path/Frameworks"
+
+targets:
+  FujiRecipesMac:
+    type: application
+    platform: macOS
+    sources:
+      - Source
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
+      - path: Resources/recipes-data.json
+        buildPhase: resources
+      - path: Resources/x100vi_helper
+        buildPhase: resources
+    dependencies:
+      - package: FujiRecipesCore
+      - package: FujiPTPClient
+        product: PTPClientMacOS
+    settings:
+      base:
+        INFOPLIST_FILE: Source/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: "Fuji Recipes"
+        INFOPLIST_KEY_CFBundleName: "Fuji Recipes"
+        PRODUCT_BUNDLE_IDENTIFIER: com.ant.fuji-recipes-mac
+        DEVELOPMENT_TEAM: ""
+      configurations:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.ant.fuji-recipes-mac.debug
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.ant.fuji-recipes-mac.release
+
+packages:
+  FujiRecipesCore:
+    path: ../../FujiRecipesCore
+  FujiPTPClient:
+    path: ../../FujiPTPClient
