@@ -6,10 +6,20 @@ import FujiRecipesCore
 
 @MainActor
 public final class RecipeStore: ObservableObject {
+    public enum LoadingState: Equatable {
+        case idle
+        case loading
+        case loaded
+        case failed
+    }
+
+    public typealias RecipeLoading = @MainActor () throws -> [Recipe]
+
     public let favorites = FavoritesStore()
     public let loadouts = LoadoutStore()
 
     @Published public var recipes: [Recipe] = []
+    @Published public private(set) var loadingState: LoadingState = .idle
     @Published public var selectedFilterCategory: FilterCategory? = nil
     @Published public var selectedFilmSimFamily: FilmSimFamily = .all
     @Published public var selectedDRFilter: DRFilter = .all
@@ -84,7 +94,15 @@ public final class RecipeStore: ObservableObject {
         }
     }
 
-    public init() {}
+    private let recipeLoading: RecipeLoading
+
+    /// The loader is injectable so previews and macOS UI tests can exercise
+    /// loaded, empty, and failure states without relying on the app bundle.
+    public init(recipeLoading: @escaping RecipeLoading = {
+        try RecipeLoader.loadRecipes(from: .main)
+    }) {
+        self.recipeLoading = recipeLoading
+    }
 
     public var filteredRecipes: [Recipe] {
         var list = recipes
@@ -151,13 +169,24 @@ public final class RecipeStore: ObservableObject {
         }
     }
 
-    public func loadRecipes() {
+    public func loadRecipes() async {
+        loadingState = .loading
+        // Give SwiftUI one run-loop turn to render an honest loading state.
+        await Task.yield()
+        loadRecipesSynchronously()
+    }
+
+    /// Synchronous entry point for deterministic snapshot generation and
+    /// focused view-model tests. Application UI should use `loadRecipes()`.
+    public func loadRecipesSynchronously() {
         do {
-            recipes = try RecipeLoader.loadRecipes(from: .main)
+            recipes = try recipeLoading()
             lastError = nil
+            loadingState = .loaded
             DebugLogger.info("Loaded \(recipes.count) recipes", category: .recipes)
         } catch {
             lastError = error.localizedDescription
+            loadingState = .failed
             DebugLogger.error("Failed to load recipes: \(error.localizedDescription)", category: .recipes)
         }
     }

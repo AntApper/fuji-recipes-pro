@@ -11,36 +11,42 @@
 		24B31F960B0B43E375CF1D1B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AD7A6F106493948957478B5B /* Assets.xcassets */; };
 		373062E6DA8679E86394D835 /* CameraViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6526C64BD5A31DE03741605 /* CameraViews.swift */; };
 		45EFA24FF8F369002892B6A9 /* LoadoutViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6494D55A29495559D79BEE6E /* LoadoutViews.swift */; };
-		A1B2C3D4E5F60718293A4B5E /* AppAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B61 /* AppAssets.swift */; };
-		A1B2C3D4E5F60718293A4B5F /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B62 /* AppShell.swift */; };
-		A1B2C3D4E5F60718293A4B60 /* GlassDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B63 /* GlassDesign.swift */; };
-		A1B2C3D4E5F60718293A4B64 /* SnapshotRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B65 /* SnapshotRenderer.swift */; };
+		5ED7AA79B7F83488945017F0 /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2D9D05BF55F33F8B8D9A510 /* AppShell.swift */; };
 		689477AB0E31884DE53CD783 /* PTPClientMacOS in Frameworks */ = {isa = PBXBuildFile; productRef = 96B8C5D0F3000FCDC1389D22 /* PTPClientMacOS */; };
+		6A6CECFA4A8810323C7EAB2B /* GlassDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = D358801E89EFF05B57002EA9 /* GlassDesign.swift */; };
 		746F56F7C45CE939540BDB64 /* FujiRecipesCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7E07608E46992A7EF9E2439E /* FujiRecipesCore */; };
+		8155F6370B1D2124F2D1DD7B /* AppAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C1B1FA821F3994E5F677084 /* AppAssets.swift */; };
+		869E6B26379C407DA5A2751E /* libusb-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = A22A780E87320959E804670A /* libusb-COPYING.txt */; };
 		8967D474460C9DFBA7867BE5 /* RecipeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B6E075FA28F4544704F5AC /* RecipeStore.swift */; };
 		89A3F4CF699E2D5A08D0C094 /* x100vi_helper in Resources */ = {isa = PBXBuildFile; fileRef = BF66A582900FE07CD6914EDB /* x100vi_helper */; };
-		A1B2C3D4E5F60718293A4B5C /* X100VIHelper in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60718293A4B5D /* X100VIHelper */; };
+		A3931CBD99101677513A9437 /* X100VIHelper in Frameworks */ = {isa = PBXBuildFile; productRef = E9A0724AD27729D80950FDC6 /* X100VIHelper */; };
+		ACAD92B2AE5F26C41F53DBD8 /* SnapshotRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD3F098AA39E32B2E983470A /* SnapshotRenderer.swift */; };
+		AEF89ADEDC020F0EAB46F21C /* x100vi_helper.provenance.json in Resources */ = {isa = PBXBuildFile; fileRef = 9124BD8B00AD84C5CC9A1337 /* x100vi_helper.provenance.json */; };
 		D0C4115ABDB21B23BA0C3CA9 /* recipes-data.json in Resources */ = {isa = PBXBuildFile; fileRef = E3AEFA618E80D9FE2B737EED /* recipes-data.json */; };
 		D247865DBD9D1106B10951CB /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD25D50FB14813A0F1BFAA5 /* App.swift */; };
+		D5176AE6C97018F5BED164D4 /* libusb-1.0.0.dylib in Resources */ = {isa = PBXBuildFile; fileRef = 643A538049390048D12E91B5 /* libusb-1.0.0.dylib */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		2C1B1FA821F3994E5F677084 /* AppAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAssets.swift; sourceTree = "<group>"; };
 		2DC371735BC4BE498B7BF9A0 /* RecipeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeViews.swift; sourceTree = "<group>"; };
 		4980B2268F5DFD8DA6BE59D1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5E0BAD97206DD706E002E530 /* FujiRecipesCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = FujiRecipesCore; path = ../../FujiRecipesCore; sourceTree = SOURCE_ROOT; };
+		643A538049390048D12E91B5 /* libusb-1.0.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libusb-1.0.0.dylib"; sourceTree = "<group>"; };
 		6494D55A29495559D79BEE6E /* LoadoutViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadoutViews.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60718293A4B61 /* AppAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAssets.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60718293A4B62 /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60718293A4B63 /* GlassDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassDesign.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60718293A4B65 /* SnapshotRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotRenderer.swift; sourceTree = "<group>"; };
+		9124BD8B00AD84C5CC9A1337 /* x100vi_helper.provenance.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = x100vi_helper.provenance.json; sourceTree = "<group>"; };
+		A22A780E87320959E804670A /* libusb-COPYING.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "libusb-COPYING.txt"; sourceTree = "<group>"; };
 		A54EC9422DEF256508F2D8B6 /* FujiPTPClient */ = {isa = PBXFileReference; lastKnownFileType = folder; name = FujiPTPClient; path = ../../FujiPTPClient; sourceTree = SOURCE_ROOT; };
 		AD7A6F106493948957478B5B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B1B6E075FA28F4544704F5AC /* RecipeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeStore.swift; sourceTree = "<group>"; };
 		B4B65B732AC95862ABC919E7 /* FujiRecipesMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FujiRecipesMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BF66A582900FE07CD6914EDB /* x100vi_helper */ = {isa = PBXFileReference; path = x100vi_helper; sourceTree = "<group>"; };
+		C2D9D05BF55F33F8B8D9A510 /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
 		CCD25D50FB14813A0F1BFAA5 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		D358801E89EFF05B57002EA9 /* GlassDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassDesign.swift; sourceTree = "<group>"; };
 		E3AEFA618E80D9FE2B737EED /* recipes-data.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "recipes-data.json"; sourceTree = "<group>"; };
 		E6526C64BD5A31DE03741605 /* CameraViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViews.swift; sourceTree = "<group>"; };
+		FD3F098AA39E32B2E983470A /* SnapshotRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotRenderer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -50,7 +56,7 @@
 			files = (
 				746F56F7C45CE939540BDB64 /* FujiRecipesCore in Frameworks */,
 				689477AB0E31884DE53CD783 /* PTPClientMacOS in Frameworks */,
-				A1B2C3D4E5F60718293A4B5C /* X100VIHelper in Frameworks */,
+				A3931CBD99101677513A9437 /* X100VIHelper in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,15 +76,15 @@
 			isa = PBXGroup;
 			children = (
 				CCD25D50FB14813A0F1BFAA5 /* App.swift */,
-				A1B2C3D4E5F60718293A4B61 /* AppAssets.swift */,
-				A1B2C3D4E5F60718293A4B62 /* AppShell.swift */,
+				2C1B1FA821F3994E5F677084 /* AppAssets.swift */,
+				C2D9D05BF55F33F8B8D9A510 /* AppShell.swift */,
 				E6526C64BD5A31DE03741605 /* CameraViews.swift */,
-				A1B2C3D4E5F60718293A4B63 /* GlassDesign.swift */,
+				D358801E89EFF05B57002EA9 /* GlassDesign.swift */,
 				4980B2268F5DFD8DA6BE59D1 /* Info.plist */,
 				6494D55A29495559D79BEE6E /* LoadoutViews.swift */,
 				B1B6E075FA28F4544704F5AC /* RecipeStore.swift */,
 				2DC371735BC4BE498B7BF9A0 /* RecipeViews.swift */,
-				A1B2C3D4E5F60718293A4B65 /* SnapshotRenderer.swift */,
+				FD3F098AA39E32B2E983470A /* SnapshotRenderer.swift */,
 			);
 			path = Source;
 			sourceTree = "<group>";
@@ -89,6 +95,7 @@
 				025274481FAE3DBF9D412311 /* Packages */,
 				57A7E2163024600BC251CF50 /* Resources */,
 				14F17918FFB129B43D885DCA /* Source */,
+				B6C85DE0594AB4639654C537 /* ThirdPartyNotices */,
 				C6C3A63D7085BC8603A088A9 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -97,10 +104,21 @@
 			isa = PBXGroup;
 			children = (
 				AD7A6F106493948957478B5B /* Assets.xcassets */,
+				643A538049390048D12E91B5 /* libusb-1.0.0.dylib */,
 				E3AEFA618E80D9FE2B737EED /* recipes-data.json */,
 				BF66A582900FE07CD6914EDB /* x100vi_helper */,
+				9124BD8B00AD84C5CC9A1337 /* x100vi_helper.provenance.json */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		B6C85DE0594AB4639654C537 /* ThirdPartyNotices */ = {
+			isa = PBXGroup;
+			children = (
+				A22A780E87320959E804670A /* libusb-COPYING.txt */,
+			);
+			name = ThirdPartyNotices;
+			path = Resources/ThirdPartyNotices;
 			sourceTree = "<group>";
 		};
 		C6C3A63D7085BC8603A088A9 /* Products */ = {
@@ -130,7 +148,7 @@
 			packageProductDependencies = (
 				7E07608E46992A7EF9E2439E /* FujiRecipesCore */,
 				96B8C5D0F3000FCDC1389D22 /* PTPClientMacOS */,
-				A1B2C3D4E5F60718293A4B5D /* X100VIHelper */,
+				E9A0724AD27729D80950FDC6 /* X100VIHelper */,
 			);
 			productName = FujiRecipesMac;
 			productReference = B4B65B732AC95862ABC919E7 /* FujiRecipesMac.app */;
@@ -179,8 +197,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				24B31F960B0B43E375CF1D1B /* Assets.xcassets in Resources */,
+				D5176AE6C97018F5BED164D4 /* libusb-1.0.0.dylib in Resources */,
+				869E6B26379C407DA5A2751E /* libusb-COPYING.txt in Resources */,
 				D0C4115ABDB21B23BA0C3CA9 /* recipes-data.json in Resources */,
 				89A3F4CF699E2D5A08D0C094 /* x100vi_helper in Resources */,
+				AEF89ADEDC020F0EAB46F21C /* x100vi_helper.provenance.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -192,14 +213,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				D247865DBD9D1106B10951CB /* App.swift in Sources */,
-				A1B2C3D4E5F60718293A4B5E /* AppAssets.swift in Sources */,
-				A1B2C3D4E5F60718293A4B5F /* AppShell.swift in Sources */,
+				8155F6370B1D2124F2D1DD7B /* AppAssets.swift in Sources */,
+				5ED7AA79B7F83488945017F0 /* AppShell.swift in Sources */,
 				373062E6DA8679E86394D835 /* CameraViews.swift in Sources */,
-				A1B2C3D4E5F60718293A4B60 /* GlassDesign.swift in Sources */,
+				6A6CECFA4A8810323C7EAB2B /* GlassDesign.swift in Sources */,
 				45EFA24FF8F369002892B6A9 /* LoadoutViews.swift in Sources */,
 				8967D474460C9DFBA7867BE5 /* RecipeStore.swift in Sources */,
 				043AD41065F4A9AD76C04E74 /* RecipeViews.swift in Sources */,
-				A1B2C3D4E5F60718293A4B64 /* SnapshotRenderer.swift in Sources */,
+				ACAD92B2AE5F26C41F53DBD8 /* SnapshotRenderer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -215,6 +236,7 @@
 				INFOPLIST_FILE = Source/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Fuji Recipes";
 				INFOPLIST_KEY_CFBundleName = "Fuji Recipes";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -258,6 +280,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_BITCODE = NO;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -272,6 +295,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -291,6 +315,7 @@
 				INFOPLIST_FILE = Source/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Fuji Recipes";
 				INFOPLIST_KEY_CFBundleName = "Fuji Recipes";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -334,6 +359,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_BITCODE = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -354,6 +380,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -408,7 +435,7 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = PTPClientMacOS;
 		};
-		A1B2C3D4E5F60718293A4B5D /* X100VIHelper */ = {
+		E9A0724AD27729D80950FDC6 /* X100VIHelper */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = X100VIHelper;
 		};

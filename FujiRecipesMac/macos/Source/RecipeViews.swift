@@ -32,40 +32,44 @@ public struct RecipeListView: View {
                 // Filter & Sort Pills
                 filterAndSortBar
 
-                // Recipe Cards Grid
-                LazyVGrid(columns: columns, spacing: 14) {
-                    ForEach(store.filteredRecipes) { recipe in
-                        RecipeCard(
-                            recipe: recipe,
-                            isExpanded: expandedRecipeIDs.contains(recipe.id),
-                            favorites: store.favorites,
-                            onToggleExpand: {
-                                withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
-                                    if expandedRecipeIDs.contains(recipe.id) {
-                                        expandedRecipeIDs.remove(recipe.id)
-                                    } else {
-                                        expandedRecipeIDs.insert(recipe.id)
+                if store.loadingState == .loading {
+                    recipeLoadingState
+                } else {
+                    // Recipe Cards Grid
+                    LazyVGrid(columns: columns, spacing: 14) {
+                        ForEach(store.filteredRecipes) { recipe in
+                            RecipeCard(
+                                recipe: recipe,
+                                isExpanded: expandedRecipeIDs.contains(recipe.id),
+                                favorites: store.favorites,
+                                onToggleExpand: {
+                                    withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+                                        if expandedRecipeIDs.contains(recipe.id) {
+                                            expandedRecipeIDs.remove(recipe.id)
+                                        } else {
+                                            expandedRecipeIDs.insert(recipe.id)
+                                        }
                                     }
+                                },
+                                onLoadToSlot: {
+                                    recipeToLoad = recipe
+                                },
+                                onSelectPhoto: { url in
+                                    selectedPhotoUrl = url
                                 }
-                            },
-                            onLoadToSlot: {
-                                recipeToLoad = recipe
-                            },
-                            onSelectPhoto: { url in
-                                selectedPhotoUrl = url
-                            }
-                        )
-                        .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.94)).combined(with: .offset(y: 10)),
-                            removal: .opacity.combined(with: .scale(scale: 0.96))
-                        ))
+                            )
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.94)).combined(with: .offset(y: 10)),
+                                removal: .opacity.combined(with: .scale(scale: 0.96))
+                            ))
+                        }
                     }
-                }
-                .animation(.spring(response: 0.32, dampingFraction: 0.8), value: store.filteredRecipes.map(\.id))
+                    .animation(.spring(response: 0.32, dampingFraction: 0.8), value: store.filteredRecipes.map(\.id))
 
-                if store.filteredRecipes.isEmpty {
-                    emptyState
-                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    if store.filteredRecipes.isEmpty {
+                        emptyState
+                            .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    }
                 }
             }
             .padding(16)
@@ -77,7 +81,11 @@ public struct RecipeListView: View {
             get: { store.lastError != nil },
             set: { if !$0 { store.lastError = nil } }
         )) {
-            Button("OK") { store.lastError = nil }
+            Button("Try Again") {
+                Task { await store.loadRecipes() }
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Dismiss", role: .cancel) { store.lastError = nil }
         } message: {
             Text(store.lastError ?? "")
         }
@@ -334,6 +342,13 @@ public struct RecipeListView: View {
                 .buttonStyle(GlassBorderedButtonStyle(accentColor: Theme.fujiAmber, height: 32))
                 .frame(width: 140)
                 .padding(.top, 6)
+            } else if store.loadingState == .failed {
+                Button("Try Loading Recipes Again") {
+                    Task { await store.loadRecipes() }
+                }
+                .buttonStyle(GlassBorderedButtonStyle(accentColor: Theme.fujiAmber, height: 32))
+                .frame(width: 220)
+                .padding(.top, 6)
             }
         }
         .frame(maxWidth: .infinity)
@@ -359,9 +374,31 @@ public struct RecipeListView: View {
         if !store.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
             return "Try searching for a different film sim, Kelvin value, or tag."
         }
+        if store.loadingState == .failed {
+            return "The bundled recipe library could not be loaded. Try again or reinstall the app if this persists."
+        }
         return store.selectedFilterCategory == .favorites
             ? "Click the star icon on any recipe to add it to your favorites."
             : "Ensure recipes-data.json is loaded."
+    }
+
+    private var recipeLoadingState: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.large)
+                .tint(Theme.fujiAmber)
+            Text("Loading recipe library…")
+                .font(.headline.weight(.semibold))
+                .glassPrimary()
+            Text("Preparing your local Fujifilm recipe collection.")
+                .font(.caption)
+                .glassSecondary()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 70)
+        .glassCard(tint: Color.white.opacity(0.02))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading recipe library")
     }
 }
 
@@ -372,6 +409,7 @@ private struct CSlotPickerSheet: View {
     let onSelect: (Int) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @FocusState private var focusedSlot: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -419,6 +457,7 @@ private struct CSlotPickerSheet: View {
         }
         .padding(24)
         .frame(minWidth: 520, idealWidth: 520, maxWidth: 520, minHeight: 570, idealHeight: 570)
+        .defaultFocus($focusedSlot, 1)
     }
 
     private func slotButton(_ slot: Int) -> some View {
@@ -452,9 +491,13 @@ private struct CSlotPickerSheet: View {
             height: 96
         ))
         .accessibilityLabel("Select C\(slot), \(destination)")
+        .accessibilityHint(isCameraConnected
+            ? "Writes and verifies \(recipe.name) on C\(slot)."
+            : "Saves \(recipe.name) as a local C\(slot) draft.")
         .help(isCameraConnected
             ? "Write \(recipe.name) to physical slot C\(slot) and verify it"
             : "Save \(recipe.name) locally to C\(slot)")
+        .focused($focusedSlot, equals: slot)
     }
 }
 
@@ -549,6 +592,7 @@ private struct RecipeCard: View {
                     .buttonStyle(.plain)
                     .help("Load recipe into C1–C7 preset slot")
                     .accessibilityLabel("Load recipe into a custom slot")
+                    .accessibilityHint("Opens a slot picker for \(recipe.name).")
 
                     // Star Favorite Button
                     Button(action: {
@@ -568,6 +612,7 @@ private struct RecipeCard: View {
                     }
                     .buttonStyle(.plain)
                     .help(isFavorite ? "Remove favorite" : "Add to favorites")
+                    .accessibilityLabel(isFavorite ? "Remove \(recipe.name) from favorites" : "Add \(recipe.name) to favorites")
                 }
 
                 // Expand Chevron
@@ -889,6 +934,8 @@ private struct SampleThumbnailButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+        .accessibilityLabel("Open sample photo")
+        .accessibilityHint("Shows the selected sample photo at a larger size.")
     }
 }
 
@@ -918,6 +965,8 @@ public struct PhotoLightboxView: View {
                             .foregroundStyle(Color.white.opacity(0.7))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close photo viewer")
+                    .accessibilityHint("Closes the enlarged sample photo.")
                     .padding()
                 }
 

@@ -1,12 +1,20 @@
 import SwiftUI
 import FujiRecipesCore
+import X100VIHelper
+
+private enum MacAppCommand {
+    static let refreshRecipes = Notification.Name("com.ant.fuji-recipes.refresh-recipes")
+    static let selectTab = Notification.Name("com.ant.fuji-recipes.select-tab")
+    static let tabKey = "tab"
+}
+
+/// Boundary for supplying a camera transport to macOS views. Tests and
+/// previews can inject a deterministic `PTPClientProtocol` without changing
+/// `CameraManager` or invoking hardware.
+public typealias CameraSessionFactory = @Sendable () -> any PTPClientProtocol
 
 @main
 struct FujiRecipesMacApp: App {
-    @StateObject private var recipeStore = RecipeStore()
-    @StateObject private var cameraManager = CameraManager()
-    @State private var selectedTab: AppTab = .recipes
-
     init() {
         DebugLogger.setMinimumLevel(.debug)
         DebugLogger.log(.info, category: .app, "🚀 FujiRecipesMac Pro launching")
@@ -27,51 +35,7 @@ struct FujiRecipesMacApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                GlassWindowBackground()
-
-                NavigationSplitView {
-                    SidebarView(
-                        selection: $selectedTab,
-                        recipeStore: recipeStore,
-                        cameraManager: cameraManager
-                    )
-                    .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 280)
-                } detail: {
-                    ZStack {
-                        Color.clear
-                        Group {
-                            switch selectedTab {
-                            case .recipes:
-                                RecipeListView(store: recipeStore, cameraManager: cameraManager)
-                            case .loadouts:
-                                LoadoutsView(loadouts: recipeStore.loadouts)
-                            case .camera:
-                                CameraConnectionView(manager: cameraManager, loadouts: recipeStore.loadouts)
-                            case .darkroom:
-                                RAFDarkroomView(manager: cameraManager)
-                            }
-                        }
-                        .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.985)).combined(with: .offset(y: 6)),
-                            removal: .opacity.combined(with: .scale(scale: 1.01))
-                        ))
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.82), value: selectedTab)
-                }
-                .navigationSplitViewStyle(.balanced)
-                .frame(minWidth: 780, minHeight: 520)
-                .tint(Theme.fujiAmber)
-                .background(.clear)
-                .scrollContentBackground(.hidden)
-            }
-            .preferredColorScheme(.dark)
-            .debugHUD()
-            .onAppear {
-                DebugLogger.log(.info, category: .app, "App appeared — Tab: \(selectedTab.rawValue)")
-                recipeStore.loadRecipes()
-            }
+            FujiRecipesMacRoot(cameraSessionFactory: { X100VIHelperClient() })
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
@@ -80,9 +44,7 @@ struct FujiRecipesMacApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Refresh Recipes") {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        recipeStore.loadRecipes()
-                    }
+                    NotificationCenter.default.post(name: MacAppCommand.refreshRecipes, object: nil)
                 }
                 .keyboardShortcut("r", modifiers: .command)
             }
@@ -90,12 +52,93 @@ struct FujiRecipesMacApp: App {
                 Divider()
                 ForEach(Array(AppTab.allCases.enumerated()), id: \.element) { index, tab in
                     Button(tab.title) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            selectedTab = tab
-                        }
+                        NotificationCenter.default.post(
+                            name: MacAppCommand.selectTab,
+                            object: nil,
+                            userInfo: [MacAppCommand.tabKey: tab.rawValue]
+                        )
                     }
                     .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
                 }
+            }
+        }
+    }
+}
+
+public struct FujiRecipesMacRoot: View {
+    @StateObject private var recipeStore: RecipeStore
+    @StateObject private var cameraManager = CameraManager()
+    @State private var selectedTab: AppTab = .recipes
+    private let cameraSessionFactory: CameraSessionFactory
+
+    public init(
+        recipeStore: RecipeStore = RecipeStore(),
+        cameraSessionFactory: @escaping CameraSessionFactory
+    ) {
+        _recipeStore = StateObject(wrappedValue: recipeStore)
+        self.cameraSessionFactory = cameraSessionFactory
+    }
+
+    public var body: some View {
+        ZStack {
+            GlassWindowBackground()
+
+            NavigationSplitView {
+                SidebarView(
+                    selection: $selectedTab,
+                    recipeStore: recipeStore,
+                    cameraManager: cameraManager
+                )
+                .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 280)
+            } detail: {
+                ZStack {
+                    Color.clear
+                    Group {
+                        switch selectedTab {
+                        case .recipes:
+                            RecipeListView(store: recipeStore, cameraManager: cameraManager)
+                        case .loadouts:
+                            LoadoutsView(loadouts: recipeStore.loadouts, cameraManager: cameraManager)
+                        case .camera:
+                            CameraConnectionView(
+                                manager: cameraManager,
+                                loadouts: recipeStore.loadouts,
+                                cameraSessionFactory: cameraSessionFactory
+                            )
+                        case .darkroom:
+                            RAFDarkroomView(manager: cameraManager)
+                        }
+                    }
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.985)).combined(with: .offset(y: 6)),
+                        removal: .opacity.combined(with: .scale(scale: 1.01))
+                    ))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(.spring(response: 0.35, dampingFraction: 0.82), value: selectedTab)
+            }
+            .navigationSplitViewStyle(.balanced)
+            .frame(minWidth: 780, minHeight: 520)
+            .tint(Theme.fujiAmber)
+            .background(.clear)
+            .scrollContentBackground(.hidden)
+        }
+        .preferredColorScheme(.dark)
+        .debugHUD()
+        .task {
+            DebugLogger.log(.info, category: .app, "App appeared — Tab: \(selectedTab.rawValue)")
+            await recipeStore.loadRecipes()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: MacAppCommand.refreshRecipes)) { _ in
+            Task { await recipeStore.loadRecipes() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: MacAppCommand.selectTab)) { notification in
+            guard
+                let rawValue = notification.userInfo?[MacAppCommand.tabKey] as? String,
+                let tab = AppTab(rawValue: rawValue)
+            else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                selectedTab = tab
             }
         }
     }

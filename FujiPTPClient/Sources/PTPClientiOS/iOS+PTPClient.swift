@@ -112,11 +112,13 @@ public final class IOSSession: PTPClientProtocol, @unchecked Sendable {
         return Data(count: 625)
     }
 
-    public func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)?) async throws -> JPEGFile? {
-        guard isConnectedFlag else { throw PTPError.notConnected }
+    public func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)?) async -> RAFConversionOutcome {
+        guard isConnectedFlag else {
+            return .failed(message: PTPError.notConnected.localizedDescription)
+        }
 
         // TODO: Full RAF upload → conversion → download sequence
-        throw PTPError.platformError("RAF conversion not yet implemented for iOS")
+        return .failed(message: "RAF conversion not yet implemented for iOS")
     }
 
     public func capturePreview() async throws -> JPEGFile? {

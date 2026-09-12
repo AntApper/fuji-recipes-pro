@@ -5,16 +5,20 @@ import FujiRecipesCore
 
 public struct LoadoutsView: View {
     @ObservedObject public var loadouts: LoadoutStore
+    @ObservedObject public var cameraManager: CameraManager
     @State private var slotPendingClear: Int?
     @State private var slotToEdit: Loadout?
     @State private var selectedDialSlot: Int = 1
+    @State private var refreshMessage: String?
+    @State private var showOverwriteDrafts = false
 
     private let columns = [
         GridItem(.adaptive(minimum: 270, maximum: 360), spacing: 14)
     ]
 
-    public init(loadouts: LoadoutStore) {
+    public init(loadouts: LoadoutStore, cameraManager: CameraManager) {
         self.loadouts = loadouts
+        self.cameraManager = cameraManager
     }
 
     public var body: some View {
@@ -67,14 +71,21 @@ public struct LoadoutsView: View {
             }
         }
         .sheet(item: $slotToEdit) { loadout in
-            SlotEditorSheet(loadout: loadout, store: loadouts, isPresented: Binding(
+            SlotEditorSheet(loadout: loadout, store: loadouts, cameraManager: cameraManager, isPresented: Binding(
                 get: { slotToEdit != nil },
                 set: { if !$0 { slotToEdit = nil } }
             ))
         }
+        .confirmationDialog("Replace local drafts with camera data?", isPresented: $showOverwriteDrafts) {
+            Button("Replace Local Drafts", role: .destructive) { refreshCameraSlots(overwriteDrafts: true) }
+            Button("Keep Local Drafts", role: .cancel) { refreshCameraSlots(overwriteDrafts: false) }
+        } message: {
+            Text("Refreshing reads C1–C7 again. Keeping drafts skips any slot edited locally until you write it to camera.")
+        }
     }
 
     private var headerPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
         SectionHeader(
             title: "Custom Dial Bank (C1–C7)",
             subtitle: "Map your favorite recipes to physical camera dial positions C1–C7. Sync directly over USB-C.",
@@ -83,6 +94,31 @@ public struct LoadoutsView: View {
             trailingLabel: "SLOTS ARMED",
             accentColor: Theme.fujiAmber
         )
+        HStack {
+            Text("Local drafts are not camera-synced until a verified write succeeds.")
+                .font(.caption2)
+                .foregroundStyle(Theme.textSecondary)
+            Spacer()
+            Button("Refresh Camera Slots") {
+                if loadouts.dirtySlots.isEmpty { refreshCameraSlots(overwriteDrafts: false) }
+                else { showOverwriteDrafts = true }
+            }
+            .disabled(cameraManager.status != .connected || cameraManager.operation == .readingSlots)
+            if cameraManager.operation == .readingSlots { ProgressView().controlSize(.small) }
+        }
+        if let refreshMessage {
+            Text(refreshMessage).font(.caption2).foregroundStyle(Theme.textSecondary)
+        }
+        }
+    }
+
+    private func refreshCameraSlots(overwriteDrafts: Bool) {
+        Task {
+            let result = await cameraManager.refreshCameraSlots(into: loadouts, overwriteDirtyDrafts: overwriteDrafts)
+            refreshMessage = result.isComplete
+                ? "Read all 7 camera slots."
+                : "Read \(result.presets.count)/7 slots. Failed: \(result.failures.map { "C\($0.slot)" }.joined(separator: ", "))."
+        }
     }
 
     private var rotaryDialStrip: some View {
@@ -261,6 +297,8 @@ public struct LoadoutCard: View {
                     }
                     .buttonStyle(.plain)
                     .help("Edit parameters for C\(slot)")
+                    .accessibilityLabel("Edit slot C\(slot)")
+                    .accessibilityHint("Opens the editor for this local slot draft.")
 
                     Button(action: onClear) {
                         Image(systemName: "xmark.circle.fill")
@@ -270,6 +308,8 @@ public struct LoadoutCard: View {
                     }
                     .buttonStyle(.plain)
                     .help("Clear slot C\(slot)")
+                    .accessibilityLabel("Clear slot C\(slot)")
+                    .accessibilityHint("Removes the local recipe settings from this slot.")
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             } else {
@@ -363,25 +403,43 @@ public struct LoadoutCard: View {
 public struct SlotEditorSheet: View {
     @State public var loadout: Loadout
     @ObservedObject public var store: LoadoutStore
+    @ObservedObject public var cameraManager: CameraManager
     @Binding public var isPresented: Bool
 
     @State private var selectedFilmSim: FilmSimulation?
     @State private var selectedDR: DynamicRange?
+    @State private var selectedGrain: GrainEffect?
+    @State private var selectedWB: WhiteBalanceMode?
+    @State private var draftName: String
+    @State private var writeMessage: String?
     @State private var highlight: Int32 = 0
     @State private var shadow: Int32 = 0
     @State private var color: Int32 = 0
     @State private var sharpness: Int32 = 0
+    @State private var includesHighlight: Bool
+    @State private var includesShadow: Bool
+    @State private var includesColor: Bool
+    @State private var includesSharpness: Bool
+    @FocusState private var isNameFocused: Bool
 
-    public init(loadout: Loadout, store: LoadoutStore, isPresented: Binding<Bool>) {
+    public init(loadout: Loadout, store: LoadoutStore, cameraManager: CameraManager, isPresented: Binding<Bool>) {
         self._loadout = State(initialValue: loadout)
         self.store = store
+        self.cameraManager = cameraManager
         self._isPresented = isPresented
         self._selectedFilmSim = State(initialValue: loadout.filmSim)
         self._selectedDR = State(initialValue: loadout.dr)
+        self._selectedGrain = State(initialValue: loadout.grain)
+        self._selectedWB = State(initialValue: loadout.wb)
+        self._draftName = State(initialValue: loadout.name)
         self._highlight = State(initialValue: loadout.highlight ?? 0)
         self._shadow = State(initialValue: loadout.shadow ?? 0)
         self._color = State(initialValue: loadout.color ?? 0)
         self._sharpness = State(initialValue: loadout.sharpness ?? 0)
+        self._includesHighlight = State(initialValue: loadout.highlight != nil)
+        self._includesShadow = State(initialValue: loadout.shadow != nil)
+        self._includesColor = State(initialValue: loadout.color != nil)
+        self._includesSharpness = State(initialValue: loadout.sharpness != nil)
     }
 
     public var body: some View {
@@ -397,6 +455,9 @@ public struct SlotEditorSheet: View {
                             icon: "slider.horizontal.3",
                             accentColor: slotAccent(loadout.slot)
                         )
+                        TextField("Slot name", text: $draftName)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($isNameFocused)
 
                         // Film Simulation Selector
                         VStack(alignment: .leading, spacing: 8) {
@@ -415,18 +476,28 @@ public struct SlotEditorSheet: View {
                             .glassCard(padding: 4, radius: 10)
                         }
 
+                        pickerSection("DYNAMIC RANGE", selection: $selectedDR, values: [.auto, .dr100, .dr200, .dr400]) { $0.displayName }
+                        pickerSection("GRAIN EFFECT", selection: $selectedGrain, values: [.off, .weakSmall, .strongSmall, .weakLarge, .strongLarge]) { $0.displayName }
+                        pickerSection("WHITE BALANCE", selection: $selectedWB, values: [.asShot, .auto, .daylight, .cloudy, .tungsten, .fluorescent1, .fluorescent2, .fluorescent3, .shade, .colorTemperature, .ambiencePriority, .underwater]) { $0.displayName }
+
                         // Tone Offset Sliders
                         VStack(alignment: .leading, spacing: 12) {
                             Text("TONE & DETAIL OFFSETS")
                                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                                 .foregroundStyle(Theme.textTertiary)
 
-                            stepperRow(title: "Highlight Tone", value: $highlight)
-                            stepperRow(title: "Shadow Tone", value: $shadow)
-                            stepperRow(title: "Color Saturation", value: $color)
-                            stepperRow(title: "Sharpness", value: $sharpness)
+                            optionalStepperRow(title: "Highlight Tone", included: $includesHighlight, value: $highlight)
+                            optionalStepperRow(title: "Shadow Tone", included: $includesShadow, value: $shadow)
+                            optionalStepperRow(title: "Color Saturation", included: $includesColor, value: $color)
+                            optionalStepperRow(title: "Sharpness", included: $includesSharpness, value: $sharpness)
                         }
                         .glassCard()
+                        if let writeMessage {
+                            Text(writeMessage).font(.caption).foregroundStyle(Theme.textSecondary)
+                        }
+                        Button("Write C\(loadout.slot) to Camera") { writeToCamera() }
+                            .buttonStyle(GlassProminentButtonStyle(color: Theme.emeraldGreen, height: 34))
+                            .disabled(cameraManager.status != .connected || cameraManager.operation == .writingSlot(loadout.slot))
                     }
                     .padding(16)
                 }
@@ -437,7 +508,7 @@ public struct SlotEditorSheet: View {
                     Button("Cancel") { isPresented = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save Changes") {
+                    Button("Save Local Draft") {
                         saveChanges()
                         isPresented = false
                     }
@@ -446,6 +517,7 @@ public struct SlotEditorSheet: View {
             }
         }
         .frame(minWidth: 440, minHeight: 400)
+        .defaultFocus($isNameFocused, true)
     }
 
     private func stepperRow(title: String, value: Binding<Int32>) -> some View {
@@ -465,6 +537,8 @@ public struct SlotEditorSheet: View {
                         .foregroundStyle(Theme.textSecondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Decrease \(title)")
+                .accessibilityHint("Decreases \(title) by one.")
 
                 Text(value.wrappedValue.formatValue)
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
@@ -482,18 +556,63 @@ public struct SlotEditorSheet: View {
                         .foregroundStyle(Theme.textSecondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Increase \(title)")
+                .accessibilityHint("Increases \(title) by one.")
             }
         }
     }
 
-    private func saveChanges() {
-        let slot = loadout.slot
-        if let sim = selectedFilmSim {
-            store.setFilmSim(for: slot, filmSim: sim)
+    private func optionalStepperRow(title: String, included: Binding<Bool>, value: Binding<Int32>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Include \(title)", isOn: included)
+                .font(.caption)
+            stepperRow(title: title, value: value)
+                .disabled(!included.wrappedValue)
+                .opacity(included.wrappedValue ? 1 : 0.45)
         }
-        store.setHighlight(for: slot, highlight: highlight)
-        store.setShadow(for: slot, shadow: shadow)
-        store.setColor(for: slot, color: color)
-        store.setSharpness(for: slot, sharpness: sharpness)
+    }
+
+    private func saveChanges() {
+        loadout.name = draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "C\(loadout.slot)" : draftName
+        loadout.filmSim = selectedFilmSim
+        loadout.dr = selectedDR
+        loadout.grain = selectedGrain
+        loadout.wb = selectedWB
+        loadout.highlight = includesHighlight ? highlight : nil
+        loadout.shadow = includesShadow ? shadow : nil
+        loadout.color = includesColor ? color : nil
+        loadout.sharpness = includesSharpness ? sharpness : nil
+        store.saveLocalDraft(loadout)
+    }
+
+    private func writeToCamera() {
+        saveChanges()
+        Task {
+            do {
+                let result = try await cameraManager.writeLoadout(loadout, to: loadout.slot)
+                store.markCameraWriteVerified(slot: loadout.slot)
+                writeMessage = result.warnings.isEmpty
+                    ? "Verified write to C\(loadout.slot)."
+                    : "Verified C\(loadout.slot) with warnings: \(result.warnings.joined(separator: ", "))"
+            } catch {
+                writeMessage = "Camera did not verify the write: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func pickerSection<T: Hashable>(
+        _ title: String,
+        selection: Binding<T?>,
+        values: [T],
+        label: @escaping (T) -> String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(Theme.textTertiary)
+            Picker(title, selection: selection) {
+                Text("None").tag(Optional<T>.none)
+                ForEach(values, id: \.self) { value in Text(label(value)).tag(Optional(value)) }
+            }
+            .pickerStyle(.menu)
+        }
     }
 }

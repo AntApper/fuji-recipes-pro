@@ -101,17 +101,6 @@ public struct GlassWindowBackground: View {
             // Deep obsidian foundation
             Theme.obsidianBlack.ignoresSafeArea()
             
-            // If custom illustration backdrop exists, blend it subtly
-            if let image = AppArt.windowBackground.image {
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .scaleEffect(1.03)
-                    .opacity(0.35)
-                    .blendMode(.luminosity)
-                    .ignoresSafeArea()
-            }
-
             // Radial ambient atmospheric glows (Fuji warmth & cool titanium)
             GeometryReader { geo in
                 ZStack {
@@ -478,6 +467,7 @@ public struct GlassIconButton: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title ?? systemImage)
         .onHover { isHovered = $0 }
         .scaleEffect(isHovered ? 1.04 : 1.0)
         .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isHovered || isActive)

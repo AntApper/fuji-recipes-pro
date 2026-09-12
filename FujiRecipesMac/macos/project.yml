@@ -11,6 +11,8 @@ settings:
     SWIFT_VERSION: "6.0"
     ENABLE_BITCODE: NO
     LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @loader_path/Frameworks"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
 
 targets:
   FujiRecipesMac:
@@ -24,15 +26,24 @@ targets:
         buildPhase: resources
       - path: Resources/x100vi_helper
         buildPhase: resources
+      - path: Resources/libusb-1.0.0.dylib
+        buildPhase: resources
+      - path: Resources/x100vi_helper.provenance.json
+        buildPhase: resources
+      - path: Resources/ThirdPartyNotices/libusb-COPYING.txt
+        buildPhase: resources
     dependencies:
       - package: FujiRecipesCore
       - package: FujiPTPClient
         product: PTPClientMacOS
+      - package: FujiPTPClient
+        product: X100VIHelper
     settings:
       base:
         INFOPLIST_FILE: Source/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: "Fuji Recipes"
         INFOPLIST_KEY_CFBundleName: "Fuji Recipes"
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.photography"
         PRODUCT_BUNDLE_IDENTIFIER: com.ant.fuji-recipes-mac
         DEVELOPMENT_TEAM: ""
       configurations:

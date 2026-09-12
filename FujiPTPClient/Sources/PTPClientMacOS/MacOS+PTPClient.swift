@@ -287,38 +287,47 @@ public final class MacOSSession: PTPClientProtocol, @unchecked Sendable {
     
     // MARK: - RAF Conversion
 
-    public func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)? = nil) async throws -> JPEGFile? {
+    public func convertRAF(_ raf: RAFFile, profileModifier: ((inout Data) -> Void)? = nil) async -> RAFConversionOutcome {
         // Note: profileModifier is not supported via the helper bridge (protocol limitation).
-        guard connected else { throw PTPError.notConnected }
+        guard connected else {
+            return .failed(message: PTPError.notConnected.localizedDescription)
+        }
         
         // Encode RAF as Base64
         let base64 = raf.data.base64EncodedString()
         
-        let result = try await bridge.sendCommand(
-            "convertRAF",
-            parameters: [
-                "name": raf.name,
-                "base64": base64,
-            ],
-            timeout: 60.0  // RAF conversion takes longer
-        )
+        let result: String
+        do {
+            result = try await bridge.sendCommand(
+                "convertRAF",
+                parameters: [
+                    "name": raf.name,
+                    "base64": base64,
+                ],
+                timeout: 60.0  // RAF conversion takes longer
+            )
+        } catch is CancellationError {
+            return .cancelled
+        } catch {
+            return .failed(message: error.localizedDescription)
+        }
         
         if result.hasPrefix("ERROR:") {
-            throw PTPError.commandFailed(0xD183, String(result.dropFirst(6)))
+            return .failed(message: PTPError.commandFailed(0xD183, String(result.dropFirst(6))).localizedDescription)
         }
         
         // Result is Base64-encoded JPEG
         guard let jpegData = Data(base64Encoded: result) else {
-            throw PTPError.commandFailed(0x900D, "Failed to decode JPEG data")
+            return .failed(message: PTPError.commandFailed(0x900D, "Failed to decode JPEG data").localizedDescription)
         }
         
-        return JPEGFile(
+        return .downloadedJPEG(JPEGFile(
             name: "converted.jpg",
             data: jpegData,
             size: UInt32(jpegData.count),
             storageID: 0xFFFFFFFF,
             objectHandle: 0
-        )
+        ))
     }
     
     // MARK: - Capture Preview
