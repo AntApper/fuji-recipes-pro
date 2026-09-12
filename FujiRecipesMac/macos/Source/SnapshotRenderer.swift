@@ -13,79 +13,64 @@ public enum SnapshotRenderer {
         try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         
         // 1. Recipes Studio View
-        let recipesView = ZStack {
-            GlassWindowBackground()
-            NavigationSplitView {
-                SidebarView(selection: .constant(.recipes), recipeStore: store, cameraManager: camera)
-                    .navigationSplitViewColumnWidth(min: 240, ideal: 260, max: 280)
-            } detail: {
-                RecipeListView(store: store)
-            }
-            .navigationSplitViewStyle(.balanced)
-            .tint(Theme.fujiAmber)
+        let recipesWindow = makeWindow(tab: .recipes, store: store, camera: camera) {
+            RecipeListView(store: store)
         }
-        .preferredColorScheme(.dark)
-        .frame(width: 1180, height: 780)
-        
-        renderHostingView(recipesView, to: outputDir.appendingPathComponent("recipes_view.png"), size: CGSize(width: 1180, height: 780))
+        renderWindow(recipesWindow, to: outputDir.appendingPathComponent("fuji_recipes_studio.png"), size: CGSize(width: 1180, height: 780))
         
         // 2. Loadouts Matrix View
-        let loadoutsView = ZStack {
-            GlassWindowBackground()
-            NavigationSplitView {
-                SidebarView(selection: .constant(.loadouts), recipeStore: store, cameraManager: camera)
-                    .navigationSplitViewColumnWidth(min: 240, ideal: 260, max: 280)
-            } detail: {
-                LoadoutsView(loadouts: store.loadouts)
-            }
-            .navigationSplitViewStyle(.balanced)
-            .tint(Theme.fujiAmber)
+        let loadoutsWindow = makeWindow(tab: .loadouts, store: store, camera: camera) {
+            LoadoutsView(loadouts: store.loadouts)
         }
-        .preferredColorScheme(.dark)
-        .frame(width: 1180, height: 780)
-        
-        renderHostingView(loadoutsView, to: outputDir.appendingPathComponent("loadouts_view.png"), size: CGSize(width: 1180, height: 780))
+        renderWindow(loadoutsWindow, to: outputDir.appendingPathComponent("fuji_custom_dial_matrix.png"), size: CGSize(width: 1180, height: 780))
         
         // 3. Camera Hub View
-        let cameraView = ZStack {
-            GlassWindowBackground()
-            NavigationSplitView {
-                SidebarView(selection: .constant(.camera), recipeStore: store, cameraManager: camera)
-                    .navigationSplitViewColumnWidth(min: 240, ideal: 260, max: 280)
-            } detail: {
-                CameraConnectionView(manager: camera, loadouts: store.loadouts)
-            }
-            .navigationSplitViewStyle(.balanced)
-            .tint(Theme.fujiAmber)
+        let cameraWindow = makeWindow(tab: .camera, store: store, camera: camera) {
+            CameraConnectionView(manager: camera, loadouts: store.loadouts)
         }
-        .preferredColorScheme(.dark)
-        .frame(width: 1180, height: 780)
-        
-        renderHostingView(cameraView, to: outputDir.appendingPathComponent("camera_hub_view.png"), size: CGSize(width: 1180, height: 780))
+        renderWindow(cameraWindow, to: outputDir.appendingPathComponent("fuji_camera_telemetry_hub.png"), size: CGSize(width: 1180, height: 780))
         
         // 4. RAF Darkroom View
-        let darkroomView = ZStack {
+        let darkroomWindow = makeWindow(tab: .darkroom, store: store, camera: camera) {
+            RAFDarkroomView(manager: camera)
+        }
+        renderWindow(darkroomWindow, to: outputDir.appendingPathComponent("fuji_in_camera_darkroom.png"), size: CGSize(width: 1180, height: 780))
+    }
+    
+    private static func makeWindow<Content: View>(
+        tab: AppTab,
+        store: RecipeStore,
+        camera: CameraManager,
+        @ViewBuilder detail: () -> Content
+    ) -> some View {
+        ZStack {
             GlassWindowBackground()
-            NavigationSplitView {
-                SidebarView(selection: .constant(.darkroom), recipeStore: store, cameraManager: camera)
-                    .navigationSplitViewColumnWidth(min: 240, ideal: 260, max: 280)
-            } detail: {
-                RAFDarkroomView(manager: camera)
+            
+            HStack(spacing: 0) {
+                SidebarView(
+                    selection: .constant(tab),
+                    recipeStore: store,
+                    cameraManager: camera
+                )
+                .frame(width: 250)
+                
+                Rectangle()
+                    .fill(Theme.specularBorder)
+                    .frame(width: 1)
+                
+                detail()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .navigationSplitViewStyle(.balanced)
-            .tint(Theme.fujiAmber)
         }
         .preferredColorScheme(.dark)
         .frame(width: 1180, height: 780)
-        
-        renderHostingView(darkroomView, to: outputDir.appendingPathComponent("darkroom_view.png"), size: CGSize(width: 1180, height: 780))
+        .tint(Theme.fujiAmber)
     }
     
-    private static func renderHostingView<V: View>(_ view: V, to url: URL, size: CGSize) {
+    private static func renderWindow<V: View>(_ view: V, to url: URL, size: CGSize) {
         let hostingView = NSHostingView(rootView: view)
         hostingView.frame = NSRect(origin: .zero, size: size)
         
-        // Create an offscreen window to guarantee layout, appearance, and subview hierarchy rendering
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless],
