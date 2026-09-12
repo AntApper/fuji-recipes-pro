@@ -16,11 +16,19 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <limits.h>
 #include <libusb-1.0/libusb.h>
 #include <unistd.h>  /* for usleep */
 
 #define FUJI_VENDOR       0x04CB
 #define X100VI_PRODUCT    0x0305
+/* X100VI has a camera-verified safe D18D label length of 15 printable ASCII
+ * characters. Its readback is a 41-byte PTP field, but that field capacity is
+ * not the writable label limit. `C4 PTP VERIFY B` (15 characters) was
+ * accepted; the 17-character app title `PRO Negative 160C` was rejected with
+ * 0x201C. Keep this proven-safe limit until a hardware boundary test checks
+ * whether 16 characters are accepted. */
+#define FUJI_PRESET_NAME_MAX_CHARACTERS 15
 
 /* ── PTP Property Definitions ─────────────────────────────────────────── */
 
@@ -76,6 +84,41 @@ static const PropDef active_props[] = {
     {0, NULL, NULL, false}
 };
 
+/* Fields exposed by PTPClientPresetData.  Preset properties are all sent as
+ * 16-bit payloads; signed fields use Int16's two's-complement bit pattern. */
+typedef struct {
+    uint16_t code;
+    const char *key;
+    bool is_signed;
+    bool conditional;
+} PresetField;
+
+static const PresetField preset_fields[] = {
+    {0xD18E, "image_size",           false, false},
+    {0xD18F, "image_quality",        false, false},
+    {0xD190, "dynamic_range",        false, false},
+    {0xD192, "film_simulation",      false, false},
+    {0xD193, "mono_warm_cool",       true,  true},
+    {0xD194, "mono_magenta_green",   true,  true},
+    {0xD195, "grain_effect",         false, false},
+    {0xD196, "color_chrome",         false, false},
+    {0xD197, "color_chrome_fx_blue", false, false},
+    {0xD198, "smooth_skin",          false, false},
+    {0xD199, "white_balance",        false, false},
+    {0xD19C, "color_temp",           false, true},
+    {0xD19A, "wb_shift_r",           true,  false},
+    {0xD19B, "wb_shift_b",           true,  false},
+    {0xD19D, "highlight",            true,  false},
+    {0xD19E, "shadow",               true,  false},
+    {0xD19F, "color",                true,  false},
+    {0xD1A0, "sharpness",            true,  false},
+    {0xD1A1, "high_iso_nr",          false, false},
+    {0xD1A2, "clarity",              true,  false},
+    {0xD1A3, "long_exp_nr",          false, false},
+    {0xD1A4, "color_space",          false, false},
+    {0, NULL, false, false}
+};
+
 /* ── Value Resolution ─────────────────────────────────────────────────── */
 
 static const char *r_film(uint32_t v) {
@@ -90,8 +133,8 @@ static const char *r_dr(uint32_t v) {
     return (v>=100 && v<=400) ? n[v/100] : NULL;
 }
 static const char *r_grain(uint32_t v) {
-    static const char *n[] = {"OFF","WEAK_SMALL","STRONG_SMALL","WEAK_LARGE","STRONG_LARGE"};
-    return (v<=4) ? n[v] : NULL;
+    static const char *n[] = {"","OFF","WEAK_SMALL","STRONG_SMALL","WEAK_LARGE","STRONG_LARGE"};
+    return (v >= 1 && v <= 5) ? n[v] : NULL;
 }
 static const char *r_chrome(uint32_t v) {
     static const char *n[] = {"OFF","WEAK","STRONG"};
@@ -506,8 +549,10 @@ static int ptp_recv_full(libusb_device_handle *dev, uint8_t *resp, int maxlen, i
     return LIBUSB_SUCCESS;
 }
 
-/* Read a 32-bit device property value */
-static int read_prop(libusb_device_handle *dev, uint16_t prop, uint32_t *val) {
+/* Read a device-property payload and require the following PTP response. */
+static int read_prop_payload(libusb_device_handle *dev, uint16_t prop,
+                             uint8_t *payload, uint32_t payloadCapacity,
+                             uint32_t *payloadLen) {
     uint8_t buf[256]; int len = 0;
 
     /* GetDevicePropValue: 0x1015 */
@@ -525,23 +570,10 @@ static int read_prop(libusb_device_handle *dev, uint16_t prop, uint32_t *val) {
     fprintf(stderr, "[DEBUG] DATA type=0x%04X code=0x%04X\n", dataType, dataCode);
     if (dataType != 0x0002) return -3;  /* Expected DATA container */
     
-    /* Extract property value from DATA container (after 12-byte header).
-     * IMPORTANT: the payload width varies by property — many Fuji vendor
-     * props (D18C–D1A5 etc.) are UINT16 (2 bytes), not UINT32 (4 bytes).
-     * Previously this only handled len>=16 (4-byte payload), so every
-     * 2-byte (or 1-byte) property silently read back as 0 regardless of
-     * what was actually stored on the camera — this was masking real
-     * property values for the entire preset-slot range. */
-    *val = 0;
-    uint32_t payloadLen = (len > 12) ? (uint32_t)(len - 12) : 0;
-    if (payloadLen >= 4) {
-        *val = buf[12] | (buf[13] << 8) | (buf[14] << 16) | (buf[15] << 24);
-    } else if (payloadLen == 2) {
-        *val = buf[12] | (buf[13] << 8);
-    } else if (payloadLen == 1) {
-        *val = buf[12];
-    }
-    fprintf(stderr, "[DEBUG] property value=0x%08X (payloadLen=%u)\n", *val, payloadLen);
+    uint32_t dataLen = (len > 12) ? (uint32_t)(len - 12) : 0;
+    if (dataLen > payloadCapacity) return -7;
+    if (dataLen > 0) memcpy(payload, buf + 12, dataLen);
+    *payloadLen = dataLen;
 
     /* Step 2: Receive RESPONSE container (type=0x0003) */
     rc = ptp_recv(dev, buf, sizeof(buf), &len);
@@ -552,9 +584,28 @@ static int read_prop(libusb_device_handle *dev, uint16_t prop, uint32_t *val) {
     uint16_t respCode = buf[6] | (buf[7] << 8);
     fprintf(stderr, "[DEBUG] RESP type=0x%04X code=0x%04X\n", respType, respCode);
     
-    /* Response code is at bytes 6-7, not in params */
-    /* Check if it's a success response (0x2001) */
-    return (respCode == 0x2001) ? 0 : -6;
+    if (respType != 0x0003) return -5;
+    return (respCode == 0x2001) ? 0 : (int)respCode;
+}
+
+/* Read a scalar device property.  Fuji C-slot numeric properties are 16-bit,
+ * but this helper retains support for the few 1- and 4-byte properties. */
+static int read_prop(libusb_device_handle *dev, uint16_t prop, uint32_t *val) {
+    uint8_t payload[4] = {0};
+    uint32_t payloadLen = 0;
+    int rc = read_prop_payload(dev, prop, payload, sizeof(payload), &payloadLen);
+    if (rc != 0) return rc;
+
+    *val = 0;
+    if (payloadLen >= 4) {
+        *val = payload[0] | (payload[1] << 8) | (payload[2] << 16) | (payload[3] << 24);
+    } else if (payloadLen == 2) {
+        *val = payload[0] | (payload[1] << 8);
+    } else if (payloadLen == 1) {
+        *val = payload[0];
+    }
+    fprintf(stderr, "[DEBUG] property value=0x%08X (payloadLen=%u)\n", *val, payloadLen);
+    return 0;
 }
 
 /* Read a large device property and save to file (e.g., 0xD185 native profile ~625 bytes) */
@@ -857,6 +908,119 @@ static int write_prop_u16(libusb_device_handle *dev, uint16_t prop, uint16_t val
     return write_prop(dev, prop, data, 2);
 }
 
+/* Encode a UTF-8 string as a PTP string: one count byte, UCS-2LE code units,
+ * and a terminating U+0000.  PTP's UCS-2 representation cannot encode
+ * supplementary-plane Unicode, so reject it instead of silently truncating. */
+static int utf8_to_ptp_string(const char *utf8, uint8_t *out, uint32_t outCapacity,
+                              uint32_t *outLen) {
+    const uint8_t *p = (const uint8_t *)utf8;
+    const uint8_t *end = p + strlen(utf8);
+    uint32_t units = 0;
+    uint32_t offset = 1;
+
+    while (p < end) {
+        uint32_t cp;
+        if (*p < 0x80) {
+            cp = *p++;
+        } else if ((*p & 0xE0) == 0xC0 && end - p >= 2 && (p[1] & 0xC0) == 0x80) {
+            cp = ((*p & 0x1F) << 6) | (p[1] & 0x3F);
+            if (cp < 0x80) return -1;  /* overlong */
+            p += 2;
+        } else if ((*p & 0xF0) == 0xE0 && end - p >= 3 &&
+                   (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
+            cp = ((*p & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+            if (cp < 0x800) return -1;  /* overlong */
+            p += 3;
+        } else if ((*p & 0xF8) == 0xF0 && end - p >= 4 &&
+                   (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80 &&
+                   (p[3] & 0xC0) == 0x80) {
+            cp = ((*p & 0x07) << 18) | ((p[1] & 0x3F) << 12) |
+                 ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+            if (cp < 0x10000 || cp > 0x10FFFF) return -1;
+            return -2;  /* valid UTF-8 but not representable in UCS-2 */
+        } else {
+            return -1;
+        }
+
+        if (cp == 0 || (cp >= 0xD800 && cp <= 0xDFFF)) return -1;
+        if (units >= 254 || offset + 2 > outCapacity) return -3;
+        put_u16_le(out + offset, (uint16_t)cp);
+        offset += 2;
+        units++;
+    }
+
+    if (offset + 2 > outCapacity) return -3;
+    put_u16_le(out + offset, 0);
+    out[0] = (uint8_t)(units + 1);  /* count includes terminator */
+    *outLen = offset + 2;
+    return 0;
+}
+
+/* Encode the exact D18D payload and enforce the camera's stricter label
+ * contract before selecting a slot or sending SetDevicePropValue. */
+static int validate_preset_name_payload(const uint8_t *data) {
+    uint32_t characters = data[0] == 0 ? 0 : data[0] - 1;
+    if (characters > FUJI_PRESET_NAME_MAX_CHARACTERS) return -404;
+    for (uint32_t i = 0; i < characters; i++) {
+        uint16_t ch = data[1 + i * 2] | (data[2 + i * 2] << 8);
+        if (ch < 0x20 || ch > 0x7E) return -405;
+    }
+    return 0;
+}
+
+static int encode_preset_name(const char *value, uint8_t *data, uint32_t capacity,
+                              uint32_t *dataLen) {
+    int rc = utf8_to_ptp_string(value, data, capacity, dataLen);
+    return rc == 0 ? validate_preset_name_payload(data) : rc;
+}
+
+/* Decode a PTP UCS-2 string to UTF-8 for C-slot readback. */
+static int ptp_string_to_utf8(const uint8_t *data, uint32_t dataLen,
+                              char *out, uint32_t outCapacity) {
+    if (dataLen == 0) {
+        if (outCapacity == 0) return -1;
+        out[0] = '\0';
+        return 0;
+    }
+    uint32_t count = data[0];
+    if (count == 0 || dataLen != 1 + count * 2 || count < 1) return -1;
+
+    uint32_t write = 0;
+    for (uint32_t i = 0; i + 1 < count; i++) {
+        uint16_t ch = data[1 + i * 2] | (data[2 + i * 2] << 8);
+        if (ch >= 0xD800 && ch <= 0xDFFF) return -1;
+        if (ch < 0x80) {
+            if (write + 1 >= outCapacity) return -1;
+            out[write++] = (char)ch;
+        } else if (ch < 0x800) {
+            if (write + 2 >= outCapacity) return -1;
+            out[write++] = (char)(0xC0 | (ch >> 6));
+            out[write++] = (char)(0x80 | (ch & 0x3F));
+        } else {
+            if (write + 3 >= outCapacity) return -1;
+            out[write++] = (char)(0xE0 | (ch >> 12));
+            out[write++] = (char)(0x80 | ((ch >> 6) & 0x3F));
+            out[write++] = (char)(0x80 | (ch & 0x3F));
+        }
+    }
+    if (data[1 + (count - 1) * 2] != 0 || data[2 + (count - 1) * 2] != 0) return -1;
+    if (write >= outCapacity) return -1;
+    out[write] = '\0';
+    return 0;
+}
+
+static int write_prop_string(libusb_device_handle *dev, uint16_t prop, const char *value) {
+    uint8_t data[511];
+    uint32_t dataLen = 0;
+    int rc = encode_preset_name(value, data, sizeof(data), &dataLen);
+    if (rc != 0) return rc;
+    fprintf(stderr, "[DEBUG] D18D payload: chars=%u bytes=%u hex=",
+            data[0] == 0 ? 0 : data[0] - 1, dataLen);
+    for (uint32_t i = 0; i < dataLen; i++) fprintf(stderr, "%02X", data[i]);
+    fprintf(stderr, "\n");
+    return write_prop(dev, prop, data, dataLen);
+}
+
 /* Write a uint32 property value (helper wrapper) */
 static int write_prop_u32(libusb_device_handle *dev, uint16_t prop, uint32_t val) {
     uint8_t data[4] = { val & 0xFF, (val >> 8) & 0xFF, (val >> 16) & 0xFF, (val >> 24) & 0xFF };
@@ -874,28 +1038,17 @@ static int write_prop(libusb_device_handle *dev, uint16_t prop, uint8_t *data, u
     fprintf(stderr, "[DEBUG] write_prop CMD: rc=%d\n", rc);
     if (rc != LIBUSB_SUCCESS) return -10;
 
-    /* Phase 2: Send DATA container (same transaction ID as COMMAND).
-     * PTP DATA containers have NO parameters — just a 12-byte header
-     * (length+type+code+transid) followed directly by the raw payload.
-     * (Previously this incorrectly reserved 4 extra bytes as if for a
-     * parameter, which shifted the real property value out of the
-     * container the camera actually parses — likely root cause of
-     * D18C/other property writes being silently ignored or rejected.) */
-    uint8_t dataContainer[64];
-    uint32_t headerLen = 12;  /* DATA containers carry no params */
-    uint32_t totalLen = headerLen + dataLen;
-    memset(dataContainer, 0, sizeof(dataContainer));
-    put_u32_le(dataContainer, totalLen);
-    put_u16_le(dataContainer + 4, 0x0002);  /* type: Data */
-    put_u16_le(dataContainer + 6, 0x1016);  /* code */
-    /* Use SAME transaction ID as COMMAND (don't increment) */
-    put_u32_le(dataContainer + 8, g_transactionId);
-    memcpy(dataContainer + headerLen, data, dataLen);
-
-    int transferred = 0;
-    fprintf(stderr, "[DEBUG] write_prop DATA: totalLen=%u transId=%u\n", totalLen, g_transactionId);
-    rc = libusb_bulk_transfer(dev, 0x01, dataContainer, totalLen, &transferred, 5000);
-    fprintf(stderr, "[DEBUG] write_prop DATA sent: rc=%d transferred=%d\n", rc, transferred);
+    /* Phase 2: Send DATA container with the COMMAND transaction ID.
+     * Do not construct this in a fixed-size local buffer: preset names are
+     * PTP strings and can legitimately exceed 52 bytes (12-byte header plus
+     * payload).  The old 64-byte buffer overflowed before libusb was called,
+     * causing macOS's checked memcpy to terminate the helper with SIGTRAP.
+     * ptp_send_data builds an exact-size container and also handles large
+     * profile payloads safely. */
+    fprintf(stderr, "[DEBUG] write_prop DATA: totalLen=%u transId=%u\n",
+            12 + dataLen, g_transactionId);
+    rc = ptp_send_data(dev, 0x1016, g_transactionId, data, dataLen);
+    fprintf(stderr, "[DEBUG] write_prop DATA sent: rc=%d\n", rc);
     if (rc != LIBUSB_SUCCESS) return -11;
 
     /* Phase 3: Receive RESPONSE container */
@@ -908,7 +1061,7 @@ static int write_prop(libusb_device_handle *dev, uint16_t prop, uint8_t *data, u
     fprintf(stderr, "[DEBUG] write_prop RESP: type=0x%04X code=0x%04X\n", type, code);
     if (type != 0x0003) return -3;  /* Expected Response */
 
-    return (code == 0x2001) ? 0 : -4;
+    return (code == 0x2001) ? 0 : (int)code;
 }
 
 /* Reset USB connection to recover from stalled device */
@@ -992,38 +1145,249 @@ static void do_close_device(libusb_device_handle **dev) {
 
 /* ── Command Parsing ─────────────────────────────────────────────────── */
 
-/* Simple JSON string value extractor */
-static const char *json_get_string(const char *json, const char *key) {
-    char pattern[64];
+static const char *json_find_value(const char *json, const char *key) {
+    static char pattern[64];
     snprintf(pattern, sizeof(pattern), "\"%s\"", key);
     const char *p = strstr(json, pattern);
     if (!p) return NULL;
     p += strlen(pattern);
     while (*p == ' ' || *p == ':') p++;
+    return p;
+}
+
+/* Simple JSON string value extractor.  It decodes JSON escapes into UTF-8 so
+ * quoted C-slot names survive the helper boundary before UCS-2 validation. */
+static const char *json_get_string(const char *json, const char *key) {
+    const char *p = json_find_value(json, key);
+    if (!p) return NULL;
     if (*p != '"') return NULL;
     p++;
-    const char *end = strchr(p, '"');
-    if (!end) return NULL;
-    /* Return a copy since we can't guarantee the original stays alive */
     static char buf[1024];
-    int len = (int)(end - p);
-    if (len >= (int)sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, p, len);
-    buf[len] = 0;
+    size_t out = 0;
+    while (*p && *p != '"') {
+        unsigned char ch = (unsigned char)*p++;
+        if (ch != '\\') {
+            if (ch < 0x20 || out + 1 >= sizeof(buf)) return NULL;
+            buf[out++] = (char)ch;
+            continue;
+        }
+        char escaped = *p++;
+        if (!escaped) return NULL;
+        switch (escaped) {
+            case '"': case '\\': case '/': buf[out++] = escaped; break;
+            case 'b': buf[out++] = '\b'; break;
+            case 'f': buf[out++] = '\f'; break;
+            case 'n': buf[out++] = '\n'; break;
+            case 'r': buf[out++] = '\r'; break;
+            case 't': buf[out++] = '\t'; break;
+            case 'u': {
+                uint16_t cp = 0;
+                for (int i = 0; i < 4; i++) {
+                    char hex = *p++;
+                    if (hex >= '0' && hex <= '9') cp = (uint16_t)((cp << 4) | (hex - '0'));
+                    else if (hex >= 'a' && hex <= 'f') cp = (uint16_t)((cp << 4) | (hex - 'a' + 10));
+                    else if (hex >= 'A' && hex <= 'F') cp = (uint16_t)((cp << 4) | (hex - 'A' + 10));
+                    else return NULL;
+                }
+                if (cp >= 0xD800 && cp <= 0xDFFF) return NULL;
+                if (cp < 0x80) {
+                    if (out + 1 >= sizeof(buf)) return NULL;
+                    buf[out++] = (char)cp;
+                } else if (cp < 0x800) {
+                    if (out + 2 >= sizeof(buf)) return NULL;
+                    buf[out++] = (char)(0xC0 | (cp >> 6));
+                    buf[out++] = (char)(0x80 | (cp & 0x3F));
+                } else {
+                    if (out + 3 >= sizeof(buf)) return NULL;
+                    buf[out++] = (char)(0xE0 | (cp >> 12));
+                    buf[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    buf[out++] = (char)(0x80 | (cp & 0x3F));
+                }
+                break;
+            }
+            default: return NULL;
+        }
+        if (out >= sizeof(buf)) return NULL;
+    }
+    if (*p != '"') return NULL;
+    buf[out] = 0;
     return buf;
 }
 
 static int json_get_int(const char *json, const char *key, int def) {
-    char pattern[64];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
+    const char *p = json_find_value(json, key);
     if (!p) return def;
-    p += strlen(pattern);
-    while (*p == ' ' || *p == ':') p++;
     if ((*p >= '0' && *p <= '9') || *p == '-') {
         return atoi(p);
     }
     return def;
+}
+
+/* C-slot JSON values are camera preset values, not active-setting/UI values.
+ * In particular, grain is 1...5 and the effect fields are 1...3. */
+static bool preset_value_is_valid(uint16_t code, uint16_t value) {
+    int16_t signedValue = (int16_t)value;
+    switch (code) {
+        case 0xD190: return value == 100 || value == 200 || value == 400 || value == 0xFFFF;
+        case 0xD195: return value >= 1 && value <= 5;
+        case 0xD196:
+        case 0xD197:
+        case 0xD198: return value >= 1 && value <= 3;
+        case 0xD199:
+            return value == 0 || value == 2 || value == 4 || value == 6 || value == 8 ||
+                   (value >= 0x8001 && value <= 0x8003) || value == 0x8006 ||
+                   value == 0x8007 || value == 0x8020 || value == 0x8021;
+        case 0xD19A:
+        case 0xD19B: return signedValue >= -9 && signedValue <= 9;
+        case 0xD19C: return value >= 2500 && value <= 10000;
+        case 0xD19D:
+        case 0xD19E: return signedValue >= -20 && signedValue <= 40;
+        case 0xD19F:
+        case 0xD1A0: return signedValue >= -40 && signedValue <= 40;
+        case 0xD1A1:
+            return value == 0x8000 || value == 0x7000 || value == 0x4000 ||
+                   value == 0x3000 || value == 0x2000 || value == 0x1000 ||
+                   value == 0x0000 || value == 0x6000 || value == 0x5000;
+        case 0xD1A2: return signedValue >= -50 && signedValue <= 50;
+        case 0xD1A3: return value <= 1;
+        case 0xD1A4: return value == 1 || value == 2;
+        default: return true;
+    }
+}
+
+static bool is_monochrome_film_sim(uint16_t filmSimulation) {
+    return (filmSimulation >= 6 && filmSimulation <= 10) ||
+           (filmSimulation >= 12 && filmSimulation <= 15);
+}
+
+/* Do not send known-inapplicable fields.  Their omitted value remains intact
+ * in the selected C-slot, which is essential for exact backup restoration. */
+static bool should_skip_conditional_field(uint16_t code, uint16_t value,
+                                          const bool *requested,
+                                          const uint16_t *values,
+                                          int fieldCount) {
+    int filmIndex = -1, wbIndex = -1;
+    for (int i = 0; i < fieldCount; i++) {
+        if (preset_fields[i].code == 0xD192) filmIndex = i;
+        if (preset_fields[i].code == 0xD199) wbIndex = i;
+    }
+    if ((code == 0xD193 || code == 0xD194) && filmIndex >= 0 && requested[filmIndex]) {
+        return !is_monochrome_film_sim(values[filmIndex]) || value == 0;
+    }
+    if (code == 0xD19C && wbIndex >= 0 && requested[wbIndex]) {
+        return values[wbIndex] != 0x8007 || value == 0;
+    }
+    if (code == 0xD19F && filmIndex >= 0 && requested[filmIndex]) {
+        return is_monochrome_film_sim(values[filmIndex]);
+    }
+    return false;
+}
+
+static int verify_preset_u16(libusb_device_handle *dev, uint16_t prop, uint16_t expected) {
+    uint32_t actual = 0;
+    int rc = read_prop(dev, prop, &actual);
+    if (rc != 0) return rc;
+    return ((uint16_t)actual == expected) ? 0 : -300;
+}
+
+static int verify_preset_name(libusb_device_handle *dev, const char *expected) {
+    uint8_t payload[511];
+    uint32_t payloadLen = 0;
+    int rc = read_prop_payload(dev, 0xD18D, payload, sizeof(payload), &payloadLen);
+    if (rc != 0) return rc;
+    char actual[1024];
+    if (ptp_string_to_utf8(payload, payloadLen, actual, sizeof(actual)) != 0) return -301;
+    return strcmp(actual, expected) == 0 ? 0 : -302;
+}
+
+/* A never-configured C slot is represented by an empty name and successful
+ * zero-valued reads for every numeric preset property.  Those zeros are a
+ * camera sentinel, not values that SetDevicePropValue accepts for every
+ * property, so callers must never use this result as a restorable baseline. */
+static int detect_empty_preset_slot(libusb_device_handle *dev, bool *isEmptySlot) {
+    *isEmptySlot = false;
+    for (int i = 0; preset_props[i].code; i++) {
+        if (preset_props[i].code == 0xD18D) {
+            uint8_t payload[511];
+            uint32_t payloadLen = 0;
+            char name[1024] = {0};
+            int rc = read_prop_payload(dev, preset_props[i].code, payload, sizeof(payload), &payloadLen);
+            if (rc != 0) return rc;
+            if (ptp_string_to_utf8(payload, payloadLen, name, sizeof(name)) != 0) return -301;
+            if (name[0] != '\0') return 0;
+        } else {
+            uint32_t value = 0;
+            int rc = read_prop(dev, preset_props[i].code, &value);
+            if (rc != 0) return rc;
+            if (value != 0) return 0;
+        }
+    }
+    *isEmptySlot = true;
+    return 0;
+}
+
+static void print_preset_write_result(const char *id, int slot, int slotSelectRc,
+                                      bool nameRequested, int nameRc,
+                                      const PresetField *fields, const bool *requested,
+                                      const uint16_t *values, const int *writeRc, const int *verifyRc,
+                                      int fieldCount, bool wasEmptySlot) {
+    bool success = slotSelectRc == 0 && (!nameRequested || nameRc == 0);
+    bool verified = success;
+    for (int i = 0; i < fieldCount; i++) {
+        if (!requested[i]) continue;
+        bool warning = fields[i].conditional && writeRc[i] == 0x201C;
+        if (!warning && (writeRc[i] != 0 || verifyRc[i] != 0)) {
+            success = false;
+            verified = false;
+        }
+    }
+    if (nameRequested && nameRc == 0 && verifyRc[fieldCount] != 0) {
+        success = false;
+        verified = false;
+    }
+
+    fprintf(stdout,
+            "{\"id\":\"%s\",\"success\":%s,\"result\":{\"slot\":%d,"
+            "\"slot_select_rc\":%d,\"verified\":%s,\"is_empty_slot\":%s,"
+            "\"created_from_empty\":%s,\"warnings\":[",
+            id, success ? "true" : "false", slot, slotSelectRc,
+            verified ? "true" : "false", wasEmptySlot ? "true" : "false",
+            (success && verified && wasEmptySlot) ? "true" : "false");
+    bool first = true;
+    for (int i = 0; i < fieldCount; i++) {
+        if (!requested[i] || !fields[i].conditional || writeRc[i] != 0x201C) continue;
+        if (!first) fputc(',', stdout);
+        first = false;
+        fprintf(stdout, "{\"property\":\"0x%04X\",\"key\":\"%s\",\"response_code\":\"0x201C\"}",
+                fields[i].code, fields[i].key);
+    }
+    fprintf(stdout, "],\"errors\":[");
+    first = true;
+    if (slotSelectRc != 0) {
+        fprintf(stdout, "{\"property\":\"0xD18C\",\"key\":\"slot\",\"rc\":%d}", slotSelectRc);
+        first = false;
+    }
+    if (nameRequested && nameRc != 0) {
+        if (!first) fputc(',', stdout);
+        fprintf(stdout, "{\"property\":\"0xD18D\",\"key\":\"name\",\"rc\":%d}", nameRc);
+        first = false;
+    } else if (nameRequested && verifyRc[fieldCount] != 0) {
+        if (!first) fputc(',', stdout);
+        fprintf(stdout, "{\"property\":\"0xD18D\",\"key\":\"name\",\"rc\":%d}", verifyRc[fieldCount]);
+        first = false;
+    }
+    for (int i = 0; i < fieldCount; i++) {
+        if (!requested[i]) continue;
+        bool warning = fields[i].conditional && writeRc[i] == 0x201C;
+        int rc = writeRc[i] != 0 ? writeRc[i] : verifyRc[i];
+        if (warning || rc == 0) continue;
+        if (!first) fputc(',', stdout);
+        fprintf(stdout,
+                "{\"property\":\"0x%04X\",\"key\":\"%s\",\"requested_raw\":\"0x%04X\",\"rc\":%d}",
+                fields[i].code, fields[i].key, values[i], rc);
+        first = false;
+    }
+    fprintf(stdout, "]}}\n");
 }
 
 /* ── Main Loop ───────────────────────────────────────────────────────── */
@@ -1061,6 +1425,32 @@ int main(int argc, char *argv[]) {
         if (!strcmp(cmd, "ping")) {
             fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":\"ok\"}\n",
                     json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            fflush(stdout);
+            continue;
+        }
+
+        /* ── inspect_preset_name ──
+         * Offline diagnostic for the exact D18D payload. It never opens or
+         * writes a camera, and is used by regression checks to compare this
+         * helper's bytes with FilmKit's standard PTP-string representation. */
+        if (!strcmp(cmd, "inspect_preset_name")) {
+            char id[128];
+            const char *requestId = json_get_string(line, "id");
+            snprintf(id, sizeof(id), "%s", requestId ? requestId : "0");
+            const char *name = json_get_string(line, "name");
+            uint8_t payload[511];
+            uint32_t payloadLen = 0;
+            int encodeRc = name ? utf8_to_ptp_string(name, payload, sizeof(payload), &payloadLen) : -401;
+            int nameRc = encodeRc == 0 ? validate_preset_name_payload(payload) : encodeRc;
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":%s,\"result\":{\"rc\":%d",
+                    id, nameRc == 0 ? "true" : "false", nameRc);
+            if (encodeRc == 0) {
+                fprintf(stdout, ",\"characters\":%u,\"ptp_payload_hex\":\"",
+                        payload[0] == 0 ? 0 : payload[0] - 1);
+                for (uint32_t i = 0; i < payloadLen; i++) fprintf(stdout, "%02X", payload[i]);
+                fprintf(stdout, "\"");
+            }
+            fprintf(stdout, "}}\n");
             fflush(stdout);
             continue;
         }
@@ -1198,35 +1588,54 @@ int main(int argc, char *argv[]) {
                 continue;
             }
             int slot = json_get_int(line, "index", 0);
-            /* Select the slot. Confirmed by direct camera testing: D18C
-             * only accepts a 4-byte (UINT32) write — a 2-byte write is
-             * rejected with 0x201C (InvalidDevicePropValue) for most
-             * values even though it silently "succeeds" for some. */
-            int slotSelRc = write_prop_u32(dev, 0xD18C, (uint32_t)slot);
+            int slotSelRc = (slot >= 1 && slot <= 7)
+                ? write_prop_u16(dev, 0xD18C, (uint16_t)slot) : -400;
             if (slotSelRc != 0) {
-                fprintf(stderr, "[WARN] D18C slot select failed: rc=%d\n", slotSelRc);
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"slot\":%d,"
+                        "\"slot_select_rc\":%d,\"error\":\"slot_select_failed\"}}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0",
+                        slot, slotSelRc);
+                fflush(stdout);
+                continue;
             }
             usleep(100000);  /* 100ms for camera to switch slot (matches FilmKit) */
 
-            /* Read all preset properties */
+            /* Read all preset properties.  An empty name plus all-zero raw
+             * values is the camera's never-configured-slot sentinel. */
+            bool isEmptySlot = true;
             fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":{\"slot\":%d,\"slot_select_rc\":%d,\"properties\":{",
 
                     json_get_string(line, "id") ? json_get_string(line, "id") : "0", slot, slotSelRc);
             bool first = true;
             for (int i = 0; preset_props[i].code; i++) {
                 uint32_t val = 0;
-                int r = read_prop(dev, preset_props[i].code, &val);
+                int r = 0;
+                char name[1024] = {0};
+                bool isName = preset_props[i].code == 0xD18D;
+                if (isName) {
+                    uint8_t payload[511];
+                    uint32_t payloadLen = 0;
+                    r = read_prop_payload(dev, preset_props[i].code, payload, sizeof(payload), &payloadLen);
+                    if (r == 0 && ptp_string_to_utf8(payload, payloadLen, name, sizeof(name)) != 0) r = -301;
+                    if (r != 0 || name[0] != '\0') isEmptySlot = false;
+                } else {
+                    r = read_prop(dev, preset_props[i].code, &val);
+                    if (r != 0 || val != 0) isEmptySlot = false;
+                }
                 if (!first) fprintf(stdout, ",");
                 first = false;
                 fprintf(stdout, "\"0x%04X_%s\":{\"rc\":%d,\"raw\":%u",
                         preset_props[i].code, preset_props[i].name, r, val);
-                if (r == 0) {
+                if (r == 0 && isName) {
+                    fprintf(stdout, ",\"display\":");
+                    json_escape_string(stdout, name);
+                } else if (r == 0) {
                     const char *display = resolve(preset_props[i].key, val);
                     if (display) fprintf(stdout, ",\"display\":\"%s\"", display);
                 }
                 fprintf(stdout, "}");
             }
-            fprintf(stdout, "}}\n");
+            fprintf(stdout, "},\"is_empty_slot\":%s}}\n", isEmptySlot ? "true" : "false");
             fflush(stdout);
             continue;
         }
@@ -1240,45 +1649,110 @@ int main(int argc, char *argv[]) {
                 continue;
             }
             int slot = json_get_int(line, "index", 0);
-            /* Select the slot (4-byte write — see read_preset_slot note). */
-            int slotSelRc = write_prop_u32(dev, 0xD18C, (uint32_t)slot);
-            if (slotSelRc != 0) {
-                fprintf(stderr, "[WARN] D18C slot select failed: rc=%d\n", slotSelRc);
+            const char *requestId = json_get_string(line, "id");
+            char id[128];
+            snprintf(id, sizeof(id), "%s", requestId ? requestId : "0");
+
+            bool requested[sizeof(preset_fields) / sizeof(preset_fields[0])] = {false};
+            int writeRc[sizeof(preset_fields) / sizeof(preset_fields[0])] = {0};
+            int verifyRc[sizeof(preset_fields) / sizeof(preset_fields[0])] = {0};
+            uint16_t values[sizeof(preset_fields) / sizeof(preset_fields[0])] = {0};
+            int fieldCount = 0;
+            while (preset_fields[fieldCount].code) fieldCount++;
+
+            bool nameRequested = json_find_value(line, "name") != NULL;
+            int nameRc = 0;
+            char name[1024] = {0};
+            if (nameRequested) {
+                const char *requestedName = json_get_string(line, "name");
+                if (!requestedName) nameRc = -401;  /* invalid JSON string */
+                else snprintf(name, sizeof(name), "%s", requestedName);
+                if (nameRc == 0) {
+                    uint8_t namePayload[511];
+                    uint32_t namePayloadLen = 0;
+                    nameRc = encode_preset_name(name, namePayload, sizeof(namePayload), &namePayloadLen);
+                }
             }
-            usleep(100000);  /* 100ms for camera to switch slot (matches FilmKit) */
 
-            /* Write properties from JSON */
-            const char *name = json_get_string(line, "name");
-            if (name && strlen(name) > 0) {
-                /* Write name as string - needs special handling */
-                /* For now, skip string writes (complex encoding) */
-                fprintf(stderr, "[HELPER] String write not yet implemented: %s\n", name);
+            /* Validate the complete request before selecting a slot or
+             * changing its name.  C-slot JSON is raw preset encoding: grain
+             * is 1...5 and effect fields are 1...3, not UI 0-based values. */
+            bool requestValid = (slot >= 1 && slot <= 7) && (!nameRequested || nameRc == 0);
+            for (int i = 0; i < fieldCount; i++) {
+                if (!json_find_value(line, preset_fields[i].key)) continue;
+                requested[i] = true;
+                int value = json_get_int(line, preset_fields[i].key, INT_MIN);
+                /* read_preset_slot emits unsigned raw bits for every property.
+                 * Accept those 0...65535 bit patterns for signed fields too,
+                 * while also accepting their natural signed JSON form. */
+                if (value == INT_MIN ||
+                    (preset_fields[i].is_signed
+                        ? (value < INT16_MIN || value > UINT16_MAX)
+                        : (value < 0 || value > UINT16_MAX))) {
+                    writeRc[i] = -402;
+                    requestValid = false;
+                    continue;
+                }
+                values[i] = (uint16_t)value;
+                if (!preset_value_is_valid(preset_fields[i].code, values[i])) {
+                    writeRc[i] = -403;
+                    requestValid = false;
+                }
             }
 
-            /* Write numeric properties */
-            uint16_t code;
-            uint32_t val;
+            if (!requestValid) {
+                int preflightRc = (slot >= 1 && slot <= 7) ? 0 : -400;
+                print_preset_write_result(id, slot, preflightRc, nameRequested, nameRc,
+                                          preset_fields, requested, values, writeRc, verifyRc, fieldCount, false);
+                fflush(stdout);
+                continue;
+            }
 
-            code = (uint16_t)json_get_int(line, "film_simulation", -1);
-            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "film_simulation", 0); write_prop_u32(dev, 0xD192, val); }
+            /* Film simulation and WB mode precede their dependent fields.
+             * Omit known-inapplicable values rather than issue 0x201C writes. */
+            for (int i = 0; i < fieldCount; i++) {
+                if (requested[i] &&
+                    should_skip_conditional_field(preset_fields[i].code, values[i],
+                                                  requested, values, fieldCount)) {
+                    requested[i] = false;
+                }
+            }
 
-            code = (uint16_t)json_get_int(line, "dynamic_range", -1);
-            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "dynamic_range", 0); write_prop_u32(dev, 0xD190, val); }
+            bool wasEmptySlot = false;
+            int slotSelRc = write_prop_u16(dev, 0xD18C, (uint16_t)slot);
+            if (slotSelRc == 0) {
+                usleep(100000);  /* verified FilmKit timing */
+                /* Detect before the first mutation.  A detection error is a
+                 * write error: without a reliable baseline we cannot report
+                 * whether this is creation or update. */
+                int emptyDetectionRc = detect_empty_preset_slot(dev, &wasEmptySlot);
+                if (emptyDetectionRc != 0) {
+                    slotSelRc = emptyDetectionRc;
+                } else if (nameRequested && nameRc == 0) {
+                    nameRc = write_prop_string(dev, 0xD18D, name);
+                }
 
-            code = (uint16_t)json_get_int(line, "grain_effect", -1);
-            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "grain_effect", 0); write_prop_u32(dev, 0xD195, val); }
+                /* D18D is a core write.  Do not mutate additional settings if
+                 * it was rejected or the supplied UTF-8 was not encodable. */
+                if (emptyDetectionRc == 0 && (!nameRequested || nameRc == 0)) {
+                    for (int i = 0; i < fieldCount; i++) {
+                        if (!requested[i]) continue;
+                        writeRc[i] = write_prop_u16(dev, preset_fields[i].code, values[i]);
+                    }
 
-            code = (uint16_t)json_get_int(line, "color_chrome", -1);
-            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "color_chrome", 0); write_prop_u32(dev, 0xD196, val); }
+                    /* Verify every accepted requested value before reporting success.
+                     * Conditional InvalidDevicePropValue fields were not applied and
+                     * are intentionally excluded from the comparison. */
+                    if (nameRequested && nameRc == 0) verifyRc[fieldCount] = verify_preset_name(dev, name);
+                    for (int i = 0; i < fieldCount; i++) {
+                        if (!requested[i] || writeRc[i] != 0) continue;
+                        verifyRc[i] = verify_preset_u16(dev, preset_fields[i].code, values[i]);
+                    }
+                }
+            }
 
-            code = (uint16_t)json_get_int(line, "white_balance", -1);
-            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "white_balance", 0); write_prop_u32(dev, 0xD199, val); }
-
-            code = (uint16_t)json_get_int(line, "sharpness", -1);
-            if (code != (uint16_t)-1) { val = (uint32_t)json_get_int(line, "sharpness", 0); write_prop_u32(dev, 0xD1A0, val); }
-
-            fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":\"ok\"}\n",
-                    json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            print_preset_write_result(id, slot, slotSelRc, nameRequested, nameRc,
+                                      preset_fields, requested, values, writeRc, verifyRc, fieldCount, wasEmptySlot);
             fflush(stdout);
             continue;
         }

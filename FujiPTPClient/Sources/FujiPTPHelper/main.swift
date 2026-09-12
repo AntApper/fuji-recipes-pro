@@ -131,6 +131,7 @@ func executeCommand(_ name: String, params: [String: Any], requestID: String) ->
         }
         let presetData = PTPHelperPresetData(
             name: dataDict["name"] as? String ?? "",
+            imageSize: dataDict["imageSize"] as? UInt32,
             imageQuality: dataDict["imageQuality"] as? UInt32,
             dynamicRange: dataDict["dynamicRange"] as? UInt32,
             filmSimulation: dataDict["filmSimulation"] as? UInt32,
@@ -146,6 +147,7 @@ func executeCommand(_ name: String, params: [String: Any], requestID: String) ->
             shadow: dataDict["shadow"] as? Int32,
             color: dataDict["color"] as? Int32,
             sharpness: dataDict["sharpness"] as? Int32,
+            highIsoNr: dataDict["highIsoNr"] as? UInt32,
             clarity: dataDict["clarity"] as? Int32,
             longExpNr: dataDict["longExpNr"] as? UInt32,
             colorSpace: dataDict["colorSpace"] as? UInt32

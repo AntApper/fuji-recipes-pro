@@ -5,6 +5,9 @@ import Foundation
 @MainActor
 public final class LoadoutStore: ObservableObject {
     @Published public private(set) var loadouts: [Loadout] = []
+    /// Slots the connected camera explicitly identified as never configured.
+    /// This is session state, not a local draft's configuration state.
+    @Published public private(set) var cameraEmptySlots: Set<Int> = []
     
     private let loadoutsKey = "com.ant.fuji-recipes.loadouts"
     
@@ -35,6 +38,10 @@ public final class LoadoutStore: ObservableObject {
     
     public func loadout(for slot: Int) -> Loadout? {
         loadouts.first { $0.slot == slot }
+    }
+
+    public func isCameraSlotEmpty(_ slot: Int) -> Bool {
+        cameraEmptySlots.contains(slot)
     }
     
     public func updateName(for slot: Int, name: String) {
@@ -153,6 +160,11 @@ public final class LoadoutStore: ObservableObject {
     /// Update all loadouts from camera preset data (auto-sync on connect).
     public func syncFromCameraPresetData(_ presetData: [PTPClientPresetData]) {
         for data in presetData {
+            if data.isEmptySlot {
+                cameraEmptySlots.insert(data.slot)
+            } else {
+                cameraEmptySlots.remove(data.slot)
+            }
             if let index = loadouts.firstIndex(where: { $0.slot == data.slot }) {
                 var loadout = loadouts[index]
                 loadout.name = data.name.isEmpty ? "C\(data.slot)" : data.name
@@ -169,10 +181,12 @@ public final class LoadoutStore: ObservableObject {
                 if let wbRaw = data.whiteBalance {
                     loadout.wb = WhiteBalanceMode(rawValue: wbRaw)
                 }
-                loadout.highlight = data.highlight
-                loadout.shadow = data.shadow
-                loadout.color = data.color
-                loadout.sharpness = data.sharpness
+                // C-slot tone fields are signed raw tenths; Loadout stores
+                // app/UI units so a subsequent write does not scale twice.
+                loadout.highlight = CSlotPresetEncoder.uiTone(from: data.highlight)
+                loadout.shadow = CSlotPresetEncoder.uiTone(from: data.shadow)
+                loadout.color = CSlotPresetEncoder.uiTone(from: data.color)
+                loadout.sharpness = CSlotPresetEncoder.uiTone(from: data.sharpness)
                 
                 loadouts[index] = loadout
             }

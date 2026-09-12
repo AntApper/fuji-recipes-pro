@@ -11,10 +11,15 @@
 		24B31F960B0B43E375CF1D1B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AD7A6F106493948957478B5B /* Assets.xcassets */; };
 		373062E6DA8679E86394D835 /* CameraViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6526C64BD5A31DE03741605 /* CameraViews.swift */; };
 		45EFA24FF8F369002892B6A9 /* LoadoutViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6494D55A29495559D79BEE6E /* LoadoutViews.swift */; };
+		A1B2C3D4E5F60718293A4B5E /* AppAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B61 /* AppAssets.swift */; };
+		A1B2C3D4E5F60718293A4B5F /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B62 /* AppShell.swift */; };
+		A1B2C3D4E5F60718293A4B60 /* GlassDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B63 /* GlassDesign.swift */; };
+		A1B2C3D4E5F60718293A4B64 /* SnapshotRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B65 /* SnapshotRenderer.swift */; };
 		689477AB0E31884DE53CD783 /* PTPClientMacOS in Frameworks */ = {isa = PBXBuildFile; productRef = 96B8C5D0F3000FCDC1389D22 /* PTPClientMacOS */; };
 		746F56F7C45CE939540BDB64 /* FujiRecipesCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7E07608E46992A7EF9E2439E /* FujiRecipesCore */; };
 		8967D474460C9DFBA7867BE5 /* RecipeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B6E075FA28F4544704F5AC /* RecipeStore.swift */; };
 		89A3F4CF699E2D5A08D0C094 /* x100vi_helper in Resources */ = {isa = PBXBuildFile; fileRef = BF66A582900FE07CD6914EDB /* x100vi_helper */; };
+		A1B2C3D4E5F60718293A4B5C /* X100VIHelper in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60718293A4B5D /* X100VIHelper */; };
 		D0C4115ABDB21B23BA0C3CA9 /* recipes-data.json in Resources */ = {isa = PBXBuildFile; fileRef = E3AEFA618E80D9FE2B737EED /* recipes-data.json */; };
 		D247865DBD9D1106B10951CB /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD25D50FB14813A0F1BFAA5 /* App.swift */; };
 /* End PBXBuildFile section */
@@ -24,6 +29,10 @@
 		4980B2268F5DFD8DA6BE59D1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5E0BAD97206DD706E002E530 /* FujiRecipesCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = FujiRecipesCore; path = ../../FujiRecipesCore; sourceTree = SOURCE_ROOT; };
 		6494D55A29495559D79BEE6E /* LoadoutViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadoutViews.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B61 /* AppAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAssets.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B62 /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B63 /* GlassDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassDesign.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B65 /* SnapshotRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotRenderer.swift; sourceTree = "<group>"; };
 		A54EC9422DEF256508F2D8B6 /* FujiPTPClient */ = {isa = PBXFileReference; lastKnownFileType = folder; name = FujiPTPClient; path = ../../FujiPTPClient; sourceTree = SOURCE_ROOT; };
 		AD7A6F106493948957478B5B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B1B6E075FA28F4544704F5AC /* RecipeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeStore.swift; sourceTree = "<group>"; };
@@ -41,6 +50,7 @@
 			files = (
 				746F56F7C45CE939540BDB64 /* FujiRecipesCore in Frameworks */,
 				689477AB0E31884DE53CD783 /* PTPClientMacOS in Frameworks */,
+				A1B2C3D4E5F60718293A4B5C /* X100VIHelper in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -60,11 +70,15 @@
 			isa = PBXGroup;
 			children = (
 				CCD25D50FB14813A0F1BFAA5 /* App.swift */,
+				A1B2C3D4E5F60718293A4B61 /* AppAssets.swift */,
+				A1B2C3D4E5F60718293A4B62 /* AppShell.swift */,
 				E6526C64BD5A31DE03741605 /* CameraViews.swift */,
+				A1B2C3D4E5F60718293A4B63 /* GlassDesign.swift */,
 				4980B2268F5DFD8DA6BE59D1 /* Info.plist */,
 				6494D55A29495559D79BEE6E /* LoadoutViews.swift */,
 				B1B6E075FA28F4544704F5AC /* RecipeStore.swift */,
 				2DC371735BC4BE498B7BF9A0 /* RecipeViews.swift */,
+				A1B2C3D4E5F60718293A4B65 /* SnapshotRenderer.swift */,
 			);
 			path = Source;
 			sourceTree = "<group>";
@@ -116,6 +130,7 @@
 			packageProductDependencies = (
 				7E07608E46992A7EF9E2439E /* FujiRecipesCore */,
 				96B8C5D0F3000FCDC1389D22 /* PTPClientMacOS */,
+				A1B2C3D4E5F60718293A4B5D /* X100VIHelper */,
 			);
 			productName = FujiRecipesMac;
 			productReference = B4B65B732AC95862ABC919E7 /* FujiRecipesMac.app */;
@@ -177,10 +192,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				D247865DBD9D1106B10951CB /* App.swift in Sources */,
+				A1B2C3D4E5F60718293A4B5E /* AppAssets.swift in Sources */,
+				A1B2C3D4E5F60718293A4B5F /* AppShell.swift in Sources */,
 				373062E6DA8679E86394D835 /* CameraViews.swift in Sources */,
+				A1B2C3D4E5F60718293A4B60 /* GlassDesign.swift in Sources */,
 				45EFA24FF8F369002892B6A9 /* LoadoutViews.swift in Sources */,
 				8967D474460C9DFBA7867BE5 /* RecipeStore.swift in Sources */,
 				043AD41065F4A9AD76C04E74 /* RecipeViews.swift in Sources */,
+				A1B2C3D4E5F60718293A4B64 /* SnapshotRenderer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -388,6 +407,10 @@
 		96B8C5D0F3000FCDC1389D22 /* PTPClientMacOS */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PTPClientMacOS;
+		};
+		A1B2C3D4E5F60718293A4B5D /* X100VIHelper */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = X100VIHelper;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

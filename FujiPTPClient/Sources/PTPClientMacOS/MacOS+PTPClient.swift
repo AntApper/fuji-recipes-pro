@@ -245,7 +245,7 @@ public final class MacOSSession: PTPClientProtocol, @unchecked Sendable {
         return data
     }
     
-    public func writePresetSlot(_ index: Int, data: PTPClientPresetData) async throws {
+    public func writePresetSlot(_ index: Int, data: PTPClientPresetData) async throws -> PTPPresetSlotWriteResult {
         guard connected else { throw PTPError.notConnected }
         guard (1...7).contains(index) else {
             throw PTPError.invalidResponse("Preset slot must be 1–7")
@@ -261,6 +261,7 @@ public final class MacOSSession: PTPClientProtocol, @unchecked Sendable {
         if result.hasPrefix("ERROR:") {
             throw PTPError.writeFailed(0xD18C, String(result.dropFirst(6)))
         }
+        return PTPPresetSlotWriteResult(slot: index)
     }
     
     // MARK: - Native Profile
@@ -413,6 +414,7 @@ public final class MacOSSession: PTPClientProtocol, @unchecked Sendable {
             slot: dict["slot"] as? Int ?? 0,
             name: dict["name"] as? String ?? "",
             imageQuality: dict["imageQuality"] as? UInt32,
+            imageSize: dict["imageSize"] as? UInt32,
             dynamicRange: dict["dynamicRange"] as? UInt32,
             filmSimulation: dict["filmSimulation"] as? UInt32,
             grainEffect: dict["grainEffect"] as? UInt32,
@@ -427,6 +429,7 @@ public final class MacOSSession: PTPClientProtocol, @unchecked Sendable {
             shadow: dict["shadow"] as? Int32,
             color: dict["color"] as? Int32,
             sharpness: dict["sharpness"] as? Int32,
+            highIsoNr: dict["highIsoNr"] as? UInt32,
             clarity: dict["clarity"] as? Int32,
             longExpNr: dict["longExpNr"] as? UInt32,
             colorSpace: dict["colorSpace"] as? UInt32
@@ -436,6 +439,8 @@ public final class MacOSSession: PTPClientProtocol, @unchecked Sendable {
     private static func encodePresetData(_ data: PTPClientPresetData) -> [String: Any] {
         [
             "name": data.name,
+            "imageSize": data.imageSize ?? 0,
+            "imageQuality": data.imageQuality ?? 0,
             "dynamicRange": data.dynamicRange ?? 0,
             "filmSimulation": data.filmSimulation ?? 0,
             "grainEffect": data.grainEffect ?? 0,
@@ -450,6 +455,7 @@ public final class MacOSSession: PTPClientProtocol, @unchecked Sendable {
             "shadow": data.shadow ?? 0,
             "color": data.color ?? 0,
             "sharpness": data.sharpness ?? 0,
+            "highIsoNr": data.highIsoNr ?? 0,
             "clarity": data.clarity ?? 0,
             "longExpNr": data.longExpNr ?? 0,
             "colorSpace": data.colorSpace ?? 0,

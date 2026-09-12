@@ -15,14 +15,12 @@ public enum AppArt: String {
         if let cached = AppArt.cache.object(forKey: rawValue as NSString) {
             return cached
         }
-        let bundles = [Bundle.module, Bundle.main]
-        for bundle in bundles {
-            if let url = bundle.url(forResource: rawValue, withExtension: "png", subdirectory: "Illustrations")
-                ?? bundle.url(forResource: rawValue, withExtension: "png"),
-               let image = NSImage(contentsOf: url) {
-                AppArt.cache.setObject(image, forKey: rawValue as NSString)
-                return image
-            }
+        let bundle = Bundle.main
+        if let url = bundle.url(forResource: rawValue, withExtension: "png", subdirectory: "Illustrations")
+            ?? bundle.url(forResource: rawValue, withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            AppArt.cache.setObject(image, forKey: rawValue as NSString)
+            return image
         }
         return nil
     }

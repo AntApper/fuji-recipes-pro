@@ -14,6 +14,11 @@ let package = Package(
         .target(
             name: "FujiRecipesCore",
             path: "Sources/FujiRecipesCore"
+        ),
+        .testTarget(
+            name: "FujiRecipesCoreTests",
+            dependencies: ["FujiRecipesCore"],
+            path: "Tests/FujiRecipesCoreTests"
         )
     ]
 )

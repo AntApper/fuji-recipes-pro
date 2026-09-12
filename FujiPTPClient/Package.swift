@@ -77,5 +77,10 @@ let package = Package(
             ],
             path: "Sources/X100VIHelper"
         ),
+        .testTarget(
+            name: "X100VIHelperTests",
+            dependencies: ["X100VIHelper", "FujiRecipesCore"],
+            path: "Tests/X100VIHelperTests"
+        ),
     ]
 )

@@ -131,6 +131,7 @@ final class PTPHelperSession {
         // Read preset properties from config
         var presetData = PTPHelperPresetData(
             name: name,
+            imageSize: getConfigUInt32(camera, context, "/main/settings/imagesize"),
             imageQuality: getConfigUInt32(camera, context, "/main/settings/quality"),
             dynamicRange: getConfigUInt32(camera, context, "/main/settings/wide_dynamic_range"),
             filmSimulation: getConfigUInt32(camera, context, "/main/settings/filmsim"),
@@ -146,6 +147,7 @@ final class PTPHelperSession {
             shadow: getConfigInt32(camera, context, "/main/settings/shadow"),
             color: getConfigInt32(camera, context, "/main/settings/color"),
             sharpness: getConfigInt32(camera, context, "/main/settings/sharpness"),
+            highIsoNr: getConfigUInt32(camera, context, "/main/settings/noisereduction"),
             clarity: getConfigInt32(camera, context, "/main/settings/clarity"),
             longExpNr: getConfigUInt32(camera, context, "/main/settings/longexpnr"),
             colorSpace: getConfigUInt32(camera, context, "/main/settings/colorspace")
@@ -175,6 +177,7 @@ final class PTPHelperSession {
         }
         
         // Write preset properties
+        if let val = data.imageSize { _ = setConfigValue(camera, context, "/main/settings/imagesize", String(val)) }
         if let val = data.imageQuality { _ = setConfigValue(camera, context, "/main/settings/quality", String(val)) }
         if let val = data.dynamicRange { _ = setConfigValue(camera, context, "/main/settings/wide_dynamic_range", String(val)) }
         if let val = data.filmSimulation { _ = setConfigValue(camera, context, "/main/settings/filmsim", String(val)) }
@@ -190,6 +193,7 @@ final class PTPHelperSession {
         if let val = data.shadow { _ = setConfigValue(camera, context, "/main/settings/shadow", String(val)) }
         if let val = data.color { _ = setConfigValue(camera, context, "/main/settings/color", String(val)) }
         if let val = data.sharpness { _ = setConfigValue(camera, context, "/main/settings/sharpness", String(val)) }
+        if let val = data.highIsoNr { _ = setConfigValue(camera, context, "/main/settings/noisereduction", String(val)) }
         if let val = data.clarity { _ = setConfigValue(camera, context, "/main/settings/clarity", String(val)) }
         if let val = data.longExpNr { _ = setConfigValue(camera, context, "/main/settings/longexpnr", String(val)) }
         if let val = data.colorSpace { _ = setConfigValue(camera, context, "/main/settings/colorspace", String(val)) }

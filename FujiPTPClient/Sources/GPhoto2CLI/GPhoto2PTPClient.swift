@@ -166,7 +166,7 @@ public final class GPhoto2PTPClient: PTPClientProtocol, @unchecked Sendable {
         }
     }
     
-    public func writePresetSlot(_ index: Int, data: PTPClientPresetData) async throws {
+    public func writePresetSlot(_ index: Int, data: PTPClientPresetData) async throws -> PTPPresetSlotWriteResult {
         try queue.sync {
             // Select the slot
             let _ = try cli.run(["--set-config", "/main/settings/preset_slot=\(index)"])
@@ -186,6 +186,9 @@ public final class GPhoto2PTPClient: PTPClientProtocol, @unchecked Sendable {
             if let dr = data.dynamicRange {
                 let _ = try cli.run(["--set-config", "/main/settings/dr=\(dr)"])
             }
+            // libgphoto2 does not expose the raw-zero C-slot sentinel, so it
+            // cannot distinguish creation from update.
+            return PTPPresetSlotWriteResult(slot: index)
         }
     }
     

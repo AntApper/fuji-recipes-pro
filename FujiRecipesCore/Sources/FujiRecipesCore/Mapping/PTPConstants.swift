@@ -70,10 +70,10 @@ public enum PTPProperty {
     /// Film Simulation (0xD192) — 1–20
     public static let presetFilmSimulation: UInt16 = 0xD192
 
-    /// Mono Warm/Cool ×10 (0xD193) — INT32
+    /// Mono Warm/Cool ×10 (0xD193) — signed 16-bit raw payload, B&W only.
     public static let presetMonoWarmCool: UInt16 = 0xD193
 
-    /// Mono Magenta/Green ×10 (0xD194) — INT32
+    /// Mono Magenta/Green ×10 (0xD194) — signed 16-bit raw payload, B&W only.
     public static let presetMonoMagentaGreen: UInt16 = 0xD194
 
     /// Grain Effect (0xD195) — 1=Off, 2=Weak, 3=Strong
@@ -91,31 +91,31 @@ public enum PTPProperty {
     /// White Balance Mode (0xD199) — uint16 WBMode
     public static let presetWhiteBalance: UInt16 = 0xD199
 
-    /// WB Shift R (0xD19A) — INT8, -9 to +9
+    /// WB Shift R (0xD19A) — signed 16-bit payload, valid -9...+9.
     public static let presetWbShiftR: UInt16 = 0xD19A
 
-    /// WB Shift B (0xD19B) — INT8, -9 to +9
+    /// WB Shift B (0xD19B) — signed 16-bit payload, valid -9...+9.
     public static let presetWbShiftB: UInt16 = 0xD19B
 
-    /// Color Temp K (0xD19C) — UINT32
+    /// Color Temp K (0xD19C) — uint16 K, only with Color Temperature WB.
     public static let presetColorTemp: UInt16 = 0xD19C
 
-    /// Highlight Tone ×10 (0xD19D) — INT32
+    /// Highlight Tone ×10 (0xD19D) — signed 16-bit payload, UI -2...+4.
     public static let presetHighlight: UInt16 = 0xD19D
 
-    /// Shadow Tone ×10 (0xD19E) — INT32
+    /// Shadow Tone ×10 (0xD19E) — signed 16-bit payload, UI -2...+4.
     public static let presetShadow: UInt16 = 0xD19E
 
-    /// Color ×10 (0xD19F) — INT32
+    /// Color ×10 (0xD19F) — signed 16-bit payload, UI -4...+4, color sims only.
     public static let presetColor: UInt16 = 0xD19F
 
-    /// Sharpness ×10 (0xD1A0) — INT32
+    /// Sharpness ×10 (0xD1A0) — signed 16-bit payload, UI -4...+4.
     public static let presetSharpness: UInt16 = 0xD1A0
 
-    /// High ISO NR (0xD1A1) — sentinel, always 0x8000
+    /// High ISO NR (0xD1A1) — Fuji proprietary uint16 lookup, not linear.
     public static let presetHighIsoNr: UInt16 = 0xD1A1
 
-    /// Clarity ×10 (0xD1A2) — INT32
+    /// Clarity ×10 (0xD1A2) — signed 16-bit payload, UI -5...+5.
     public static let presetClarity: UInt16 = 0xD1A2
 
     /// Long Exp NR (0xD1A3) — 0=Off, 1=On
