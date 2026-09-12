@@ -14,6 +14,15 @@ struct FujiRecipesMacApp: App {
 
         CrashReportHelper.setup()
         DebugLogger.info("CrashReportHelper.setup() complete", category: .app)
+        
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--generate-snapshots") {
+            Task { @MainActor in
+                SnapshotRenderer.renderSnapshots()
+                exit(0)
+            }
+        }
+        #endif
     }
 
     var body: some Scene {
