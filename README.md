@@ -15,22 +15,30 @@ A cross-platform native macOS and iOS application suite designed for **Fujifilm 
 ### 1. Recipes Studio
 Browse, search, and filter formulations by film simulation family, dynamic range, and exposure parameters. Features real-time tone curve radar indicators, color-temperature Kelvin chips, and full photo lightboxes.
 
-![Recipes Studio View](docs/screenshots/recipes_view.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AntApper/fuji-recipes-pro/main/docs/screenshots/recipes_view.png" alt="Recipes Studio View" width="100%" />
+</p>
 
 ### 2. Custom Dial Bank Matrix (C1–C7)
 Map recipes directly to physical custom camera positions C1 through C7. Inspect tone curves and tune parameter offsets with the interactive in-place slot editor.
 
-![C1-C7 Preset Matrix](docs/screenshots/loadouts_view.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AntApper/fuji-recipes-pro/main/docs/screenshots/loadouts_view.png" alt="C1-C7 Preset Matrix" width="100%" />
+</p>
 
 ### 3. Camera Telemetry & Hardware Hub
 Live PTP session telemetry over USB-C, device status monitoring, vendor opcode diagnostic indicators, and connection recovery troubleshooting.
 
-![Camera Hub](docs/screenshots/camera_hub_view.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AntApper/fuji-recipes-pro/main/docs/screenshots/camera_hub_view.png" alt="Camera Hub" width="100%" />
+</p>
 
 ### 4. In-Camera RAF Darkroom
 Direct raw `.RAF` payload processing powered by the X100VI's dedicated on-sensor imaging pipeline.
 
-![RAF Darkroom](docs/screenshots/darkroom_view.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AntApper/fuji-recipes-pro/main/docs/screenshots/darkroom_view.png" alt="RAF Darkroom" width="100%" />
+</p>
 
 ---
 
