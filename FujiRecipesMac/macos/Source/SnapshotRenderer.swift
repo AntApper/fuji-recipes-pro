@@ -26,7 +26,7 @@ public enum SnapshotRenderer {
 
         let shots: [(String, AppTab, AnyView)] = [
             ("recipes_studio_\(tag).png", .recipes, AnyView(
-                RecipeListView(store: store)
+                RecipeListView(store: store, cameraManager: camera)
                     .environment(\.snapshotMode, true)
             )),
             ("custom_dial_matrix_\(tag).png", .loadouts, AnyView(
