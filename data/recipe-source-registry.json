@@ -1,0 +1,26 @@
+{
+  "registryVersion": 1,
+  "purpose": "Provenance and reuse constraints for recipe-setting imports. Store only factual camera settings needed for private/local research; do not copy creator prose or images.",
+  "sources": [
+    {
+      "id": "fuji-x-weekly-x-trans-v",
+      "publisher": "Fuji X Weekly",
+      "creatorAttribution": "Individual article author is retained in the source page; existing scraped records do not consistently contain author metadata.",
+      "sourceUrl": "https://fujixweekly.com/fujifilm-x-trans-v-recipes/",
+      "sourceType": "public recipe index and articles",
+      "dataLocation": "data/fujixweekly/x-trans-v-recipes.json",
+      "reuseStatus": "Third-party copyrighted content; private/local use only unless permission or a license is obtained.",
+      "lastReviewed": "2026-09-12"
+    },
+    {
+      "id": "mike-chudley-x100vi-reala-ace",
+      "publisher": "Mike Chudley",
+      "creatorAttribution": "Michael Chudley",
+      "sourceUrl": "https://www.mikechudley.com/blogs/x100vijpegs",
+      "sourceType": "creator-owned public recipe page",
+      "dataLocation": "data/curated/x100vi-recipes.json",
+      "reuseStatus": "No explicit reuse license located. The import is a manual transcription of factual settings only, with no copied prose or images; retain for private/local research unless permission is obtained.",
+      "lastReviewed": "2026-09-12"
+    }
+  ]
+}

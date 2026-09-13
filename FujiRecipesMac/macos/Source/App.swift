@@ -141,5 +141,9 @@ public struct FujiRecipesMacRoot: View {
                 selectedTab = tab
             }
         }
+        .accessibilityAction(named: "Show Recipes") { selectedTab = .recipes }
+        .accessibilityAction(named: "Show Custom Dial Matrix") { selectedTab = .loadouts }
+        .accessibilityAction(named: "Show Camera Hub") { selectedTab = .camera }
+        .accessibilityAction(named: "Show RAF Darkroom") { selectedTab = .darkroom }
     }
 }

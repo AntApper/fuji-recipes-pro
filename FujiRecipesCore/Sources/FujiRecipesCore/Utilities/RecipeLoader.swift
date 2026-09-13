@@ -29,6 +29,8 @@ public struct PropertyInfo: Codable, Sendable {
 public struct RecipeJSON: Codable, Sendable {
     public let id: String
     public let name: String
+    /// Attribution carried through from the scraped source when available.
+    public let source: String?
     public let sensorGeneration: String
     public let filmSimulation: String?
     public let filmSimEnum: Int?
@@ -40,10 +42,13 @@ public struct RecipeJSON: Codable, Sendable {
     public let imageUrls: [String]?
     public let date: String?
     public let compatibleCameras: [String]?
+    /// Source-provided keywords. They are not inferred by the app.
+    public let tags: [String]?
 
     public init(
         id: String,
         name: String,
+        source: String? = nil,
         sensorGeneration: String,
         filmSimulation: String?,
         filmSimEnum: Int?,
@@ -54,10 +59,12 @@ public struct RecipeJSON: Codable, Sendable {
         previewImageUrl: String?,
         imageUrls: [String]?,
         date: String?,
-        compatibleCameras: [String]?
+        compatibleCameras: [String]?,
+        tags: [String]? = nil
     ) {
         self.id = id
         self.name = name
+        self.source = source
         self.sensorGeneration = sensorGeneration
         self.filmSimulation = filmSimulation
         self.filmSimEnum = filmSimEnum
@@ -69,6 +76,7 @@ public struct RecipeJSON: Codable, Sendable {
         self.imageUrls = imageUrls
         self.date = date
         self.compatibleCameras = compatibleCameras
+        self.tags = tags
     }
 }
 
@@ -114,11 +122,11 @@ public enum RecipeLoader {
         return Recipe(
             id: jsonRecipe.id,
             name: jsonRecipe.name,
-            source: "Fuji X Weekly",
+            source: jsonRecipe.source?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "Fuji X Weekly",
             sourceUrl: jsonRecipe.sourceUrl,
             previewImageUrl: jsonRecipe.previewImageUrl,
             imageUrls: jsonRecipe.imageUrls,
-            date: nil,
+            date: date(from: jsonRecipe.date),
             dateString: jsonRecipe.date,
             filmSimulation: filmSim,
             dynamicRange: dr,
@@ -143,9 +151,18 @@ public enum RecipeLoader {
             settings: jsonRecipe.settings,
             sensorGeneration: jsonRecipe.sensorGeneration,
             compatibleCameras: jsonRecipe.compatibleCameras,
-            tags: jsonRecipe.filmSimulation.map { [$0] } ?? [],
+            tags: jsonRecipe.tags,
             parseStatus: .ok
         )
+    }
+
+    private static func date(from string: String?) -> Date? {
+        guard let string else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MMMM d, yyyy"
+        return formatter.date(from: string)
     }
 }
 
@@ -167,4 +184,8 @@ public enum RecipeLoaderError: Error, LocalizedError {
 extension Double {
     public var intValue: Int { Int(self) }
     public var int32Value: Int32 { Int32(self) }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }

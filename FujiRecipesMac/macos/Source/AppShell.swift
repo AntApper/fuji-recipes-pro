@@ -265,7 +265,7 @@ public struct SidebarView: View {
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
 
-                Text(cameraManager.status == .connected ? "USB PTP • Ready" : "X100VI USB RAW")
+                Text(cameraManager.status.detailLabel)
                     .font(.system(size: 8, weight: .medium, design: .monospaced))
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
@@ -355,6 +355,9 @@ private struct SidebarRow: View {
             .onHover { isHovered = $0 }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(tab.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint("Opens the \(tab.title) workspace.")
     }
 
     private var rowBackground: Color {
@@ -417,6 +420,15 @@ public extension CameraStatus {
         case .connecting: return "PTP Connecting…"
         case .connected: return "Camera Online"
         case .error: return "Link Offline"
+        }
+    }
+
+    var detailLabel: String {
+        switch self {
+        case .disconnected: return "X100VI USB RAW • Not connected"
+        case .connecting: return "USB PTP • Connecting"
+        case .connected: return "USB PTP • Verified session"
+        case .error: return "USB PTP • Connection needs attention"
         }
     }
 

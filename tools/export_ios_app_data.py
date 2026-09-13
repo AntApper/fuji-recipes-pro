@@ -322,17 +322,25 @@ def normalize_recipe_for_ios(recipe: dict) -> dict:
     return {
         "id": recipe.get("id"),
         "name": recipe.get("name"),
+        # Preserve source provenance and source-provided keywords for the
+        # catalog. The app only presents these fields; it does not infer them.
+        "source": recipe.get("source"),
         "sensorGeneration": recipe.get("sensorGeneration"),
         "filmSimulation": film_sim_raw,
         "filmSimEnum": film_sim_enum,
         "settings": settings,
         "ptpSettings": ptp_settings,
         "presetSettings": preset_settings,
+        "source": recipe.get("source"),
         "sourceUrl": recipe.get("sourceUrl"),
+        "sourceType": recipe.get("sourceType"),
+        "creator": recipe.get("creator"),
+        "provenance": recipe.get("provenance"),
         "previewImageUrl": recipe.get("previewImageUrl"),
         "imageUrls": recipe.get("imageUrls", []),
         "date": recipe.get("date"),
         "compatibleCameras": recipe.get("compatibleCameras", []),
+        "tags": recipe.get("tags", []),
     }
 
 

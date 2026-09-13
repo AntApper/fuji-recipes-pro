@@ -38,6 +38,7 @@ public struct LoadoutsView: View {
                             loadout: loadout,
                             slot: slot,
                             isSelected: selectedDialSlot == slot,
+                            onSelect: { selectedDialSlot = slot },
                             onClear: { slotPendingClear = slot },
                             onEdit: { slotToEdit = loadout }
                         )
@@ -95,7 +96,7 @@ public struct LoadoutsView: View {
             accentColor: Theme.fujiAmber
         )
         HStack {
-            Text("Local drafts are not camera-synced until a verified write succeeds.")
+            Text("Selected: C\(selectedDialSlot). Local drafts are not camera-synced until a verified write succeeds.")
                 .font(.caption2)
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
@@ -205,6 +206,7 @@ public struct LoadoutCard: View {
     public let loadout: Loadout?
     public let slot: Int
     public var isSelected: Bool = false
+    public var onSelect: () -> Void = {}
     public var onClear: () -> Void = {}
     public var onEdit: () -> Void = {}
 
@@ -217,12 +219,14 @@ public struct LoadoutCard: View {
         loadout: Loadout?,
         slot: Int,
         isSelected: Bool = false,
+        onSelect: @escaping () -> Void = {},
         onClear: @escaping () -> Void = {},
         onEdit: @escaping () -> Void = {}
     ) {
         self.loadout = loadout
         self.slot = slot
         self.isSelected = isSelected
+        self.onSelect = onSelect
         self.onClear = onClear
         self.onEdit = onEdit
     }
@@ -263,6 +267,13 @@ public struct LoadoutCard: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isSelected)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isConfigured)
         .onHover { isHovered = $0 }
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture(perform: onSelect)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Custom slot C\(slot), \(isConfigured ? "configured" : "empty")")
+        .accessibilityHint(isSelected ? "Selected. Use the edit button to change this local draft." : "Selects this custom slot.")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAction(named: "Select slot C\(slot)") { onSelect() }
     }
 
     private var slotHeader: some View {

@@ -1,0 +1,62 @@
+{
+  "source": "Curated public recipe imports",
+  "sourceUrl": "https://www.mikechudley.com/blogs/x100vijpegs",
+  "sensorGeneration": "X-Trans V",
+  "importedAt": "2026-09-12T23:50:00Z",
+  "recipeCount": 1,
+  "recipes": [
+    {
+      "id": "mike-chudley-perfect-x100vi-reala-ace",
+      "name": "Chudley Reala Ace",
+      "title": "Michael Chudley's X100VI Reala Ace Recipe",
+      "source": "Mike Chudley",
+      "sourceUrl": "https://www.mikechudley.com/blogs/x100vijpegs",
+      "sourceType": "creator-owned public recipe page",
+      "creator": "Michael Chudley",
+      "sensorGeneration": "X-Trans V",
+      "date": "2024-03-25",
+      "previewImageUrl": null,
+      "imageUrls": [],
+      "compatibleCameras": [
+        "X100VI"
+      ],
+      "tags": [
+        "X100VI",
+        "Reala Ace",
+        "creator-published"
+      ],
+      "settings": {
+        "filmSimulation": "Reala Ace",
+        "dynamicRange": "DR200",
+        "grainEffect": "Weak, Small",
+        "colorChromeEffect": "Weak",
+        "colorChromeFxBlue": "Weak",
+        "whiteBalance": "5800K, +2 Red & -3 Blue",
+        "highlight": "+1",
+        "shadow": "+1",
+        "color": "+2",
+        "sharpness": "0",
+        "clarity": "0"
+      },
+      "settingCount": 11,
+      "parseStatus": "ok",
+      "reviewNotes": [
+        "The source page does not specify ISO or exposure compensation; those fields are intentionally omitted."
+      ],
+      "provenance": {
+        "retrievedAt": "2026-09-12",
+        "importMethod": "Manual transcription of factual camera settings only; no source prose or images retained.",
+        "licenseStatus": "No explicit reuse license was found. Retained for private/local recipe research only; do not redistribute source prose or images.",
+        "mappingCompleteness": {
+          "providedSettingCount": 11,
+          "presetSlotMappedCount": 11,
+          "activeShootingMappedCount": 9,
+          "activeShootingRequiresProbe": [
+            "colorChromeFxBlue",
+            "clarity"
+          ]
+        }
+      }
+    }
+  ]
+}
