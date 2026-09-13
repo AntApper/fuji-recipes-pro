@@ -51,7 +51,10 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: com.ant.fuji-recipes-mac.debug
           SWIFT_OPTIMIZATION_LEVEL: "-Onone"
         Release:
-          PRODUCT_BUNDLE_IDENTIFIER: com.ant.fuji-recipes-mac.release
+          # Distribution keeps the registered, stable identifier. The Debug
+          # variant remains distinct so development installs cannot overwrite
+          # a signed release app.
+          ENABLE_HARDENED_RUNTIME: YES
 
 packages:
   FujiRecipesCore:

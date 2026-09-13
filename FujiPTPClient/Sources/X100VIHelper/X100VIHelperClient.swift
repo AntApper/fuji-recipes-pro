@@ -27,11 +27,20 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
     private var transactionID = 0
     private var pendingRequests: [String: PendingRequest] = [:]
     private var _cameraInfo: PTPCameraInfo = PTPCameraInfo(model: "Not connected")
+    private var lifecycle: HelperLifecycle = .idle
+    private var shutdownTask: Task<Void, Never>?
 
     // All mutable state is touched only inside the serial `queue`.  The public
     // `async` entry points dispatch to it; the request-processor task (which
     // owns the line iterator) runs on the cooperative thread pool.
     private let queue = DispatchQueue(label: "com.fujirecipes.x100vi-helper")
+
+    private enum HelperLifecycle {
+        case idle
+        case connecting
+        case connected
+        case disconnecting
+    }
 
     public var isConnected: Bool {
         queue.sync { isConnectedFlag }
@@ -45,6 +54,18 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
     // MARK: - PTPClientProtocol
 
     public func connect() async throws {
+        if let pendingShutdown = queue.sync(execute: { shutdownTask }) {
+            await pendingShutdown.value
+        }
+        let canStart = queue.sync { () -> Bool in
+            guard lifecycle == .idle else { return false }
+            lifecycle = .connecting
+            return true
+        }
+        guard canStart else {
+            throw PTPError.connectionFailed("X100VI helper connection is already active")
+        }
+
         // ptpcamerad auto-respawns and grabs the USB interface on macOS.
         // Kill it before every connect so libusb can claim the device.
         #if os(macOS)
@@ -55,8 +76,13 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         task.waitUntilExit()
         #endif
 
-        return try await withTimeout(timeout: 30) {
-            try await self.connectInternal()
+        do {
+            try await withTimeout(timeout: 30) {
+                try await self.connectInternal()
+            }
+        } catch {
+            disconnect()
+            throw error
         }
     }
 
@@ -83,6 +109,10 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
             client.queue.async {
                 guard client.process === terminatedProcess else { return }
                 client.terminationSummary = reason
+                client.isConnectedFlag = false
+                if client.shutdownTask == nil {
+                    client.lifecycle = .idle
+                }
                 client.failAllPendingLocked(
                     PTPError.notConnected
                 )
@@ -130,7 +160,6 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
             self.stderrReaderTask = stderrReader
             self.stderrTail = ""
             self.terminationSummary = nil
-            self.isConnectedFlag = true
         }
 
         // Start the single worker that owns the iterator and serialises I/O.
@@ -159,6 +188,10 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
                 model: "Fuji X100VI",
                 vendorExtensionId: 0x0000000E
             )
+            self.queue.sync {
+                self.isConnectedFlag = true
+                self.lifecycle = .connected
+            }
         } catch {
             // A failed handshake must not leave the child process or a claimed
             // USB interface alive for the next connection attempt.
@@ -168,26 +201,26 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
     }
 
     public func disconnect() {
-        queue.sync {
+        let processToStop: Process? = queue.sync {
+            guard shutdownTask == nil else { return nil }
             isConnectedFlag = false
-            failAllPendingLocked(PTPError.notConnected)
-            requestStreamContinuation?.finish()
-            requestStreamContinuation = nil
-            requestProcessorTask?.cancel()
-            requestProcessorTask = nil
-            stderrReaderTask?.cancel()
-            stderrReaderTask = nil
-
-            if let proc = process, proc.isRunning {
-                proc.terminate()
-                // Do not wait here: this runs inside queue.sync and could deadlock
-                // if the helper is blocked reading.  A short async cleanup follows.
+            lifecycle = .disconnecting
+            guard let process else {
+                lifecycle = .idle
+                return nil
             }
-            process = nil
-            inputPipe = nil
-            errorPipe = nil
-            lineIterator = nil
+            return process
         }
+        guard let processToStop else { return }
+
+        // PTPClientProtocol intentionally exposes synchronous disconnect.
+        // Keep that API stable while serialising a graceful JSON teardown
+        // behind it; a following connect awaits this task before spawning.
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.shutdownHelperGracefully(processToStop)
+        }
+        queue.sync { shutdownTask = task }
     }
 
     public func readProperty(_ code: UInt16) async throws -> PTPPropertyResponse {
@@ -686,6 +719,7 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
 
     private enum HelperRequestPhase {
         case handshake
+        case shutdown
         case property
         case preset
         case transfer
@@ -694,6 +728,7 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         var timeout: TimeInterval {
             switch self {
             case .handshake: 10
+            case .shutdown: 3
             case .property: 15
             case .preset: 30
             case .transfer: 90
@@ -704,6 +739,7 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         static func forCommand(_ command: String) -> Self {
             switch command {
             case "ping", "connect", "reconnect": .handshake
+            case "disconnect", "exit": .shutdown
             case "read_preset_slot", "write_preset_slot": .preset
             case "load_raf", "get_profile", "set_profile", "wait_result": .transfer
             case "convert_raf": .conversionPipeline
@@ -870,6 +906,78 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         queue.async {
             self.pendingRequests.removeValue(forKey: request.id)
             request.cancel()
+        }
+    }
+
+    /// Sends the helper's camera disconnect command, then asks its process to
+    /// exit normally. Only a missing/late response or a late process exit
+    /// falls back to SIGTERM, preserving CloseSession whenever the helper can
+    /// still communicate with the camera.
+    private func shutdownHelperGracefully(_ expectedProcess: Process) async {
+        if expectedProcess.isRunning {
+            do {
+                let disconnectResponse = try await sendCommand(
+                    "disconnect",
+                    params: [:],
+                    phase: .shutdown
+                )
+                guard disconnectResponse["success"] as? Bool == true else {
+                    throw PTPError.invalidResponse("Helper rejected disconnect")
+                }
+
+                let exitResponse = try await sendCommand(
+                    "exit",
+                    params: [:],
+                    phase: .shutdown
+                )
+                guard exitResponse["success"] as? Bool == true else {
+                    throw PTPError.invalidResponse("Helper rejected exit")
+                }
+            } catch {
+                appendHelperStderr("Graceful shutdown failed: \(error.localizedDescription)")
+            }
+
+            // Closing stdin after the exit response also lets helpers built
+            // before the exit acknowledgement exit by EOF.
+            queue.sync {
+                guard process === expectedProcess else { return }
+                inputPipe?.fileHandleForWriting.closeFile()
+            }
+
+            if !(await waitForProcessExit(expectedProcess, timeout: 2)) {
+                appendHelperStderr("Helper did not exit after graceful shutdown; terminating")
+                expectedProcess.terminate()
+                _ = await waitForProcessExit(expectedProcess, timeout: 1)
+            }
+        }
+        cleanupHelper(expectedProcess)
+    }
+
+    private func waitForProcessExit(_ process: Process, timeout: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return !process.isRunning
+    }
+
+    private func cleanupHelper(_ expectedProcess: Process) {
+        queue.sync {
+            guard process === expectedProcess else { return }
+            isConnectedFlag = false
+            failAllPendingLocked(PTPError.notConnected)
+            requestStreamContinuation?.finish()
+            requestStreamContinuation = nil
+            requestProcessorTask?.cancel()
+            requestProcessorTask = nil
+            stderrReaderTask?.cancel()
+            stderrReaderTask = nil
+            inputPipe = nil
+            errorPipe = nil
+            lineIterator = nil
+            process = nil
+            lifecycle = .idle
+            shutdownTask = nil
         }
     }
 

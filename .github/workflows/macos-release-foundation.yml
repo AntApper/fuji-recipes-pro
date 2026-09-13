@@ -51,9 +51,15 @@ jobs:
           build
 
   release-inputs:
-    name: Helper resource provenance
+    name: Release bundle evidence
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - name: Verify helper resource and runtime provenance
         run: scripts/verify-macos-release-foundation.sh
+      - name: Package and verify unsigned release candidate
+        run: |
+          cd FujiRecipesMac/macos
+          ./package_app.sh release \
+            --version 1.0.0 \
+            --build-number "${{ github.run_number }}"

@@ -167,10 +167,14 @@ cd ../FujiRecipesMac/macos && xcodegen generate
 
 ## Credential-free release checks
 
-These checks intentionally do not sign, notarize, or contact a camera:
+These checks intentionally do not contact Apple or a camera:
 
 ```bash
 scripts/verify-macos-release-foundation.sh
+
+# Build a locally signed (ad-hoc) universal bundle and verify it.
+cd FujiRecipesMac/macos
+./package_app.sh release --version 1.0.0 --build-number 1
 ```
 
 The check validates helper source/resource hashes, the bundled libusb license,
@@ -178,8 +182,23 @@ The check validates helper source/resource hashes, the bundled libusb license,
 version of both Mach-O files. A release build requires universal `arm64` and
 `x86_64` artifacts with a macOS 14.0-or-earlier runtime.
 
-See `docs/MACOS_RELEASE_BOUNDARIES.md` for the current Developer ID, App Store,
-notarization, and iOS boundaries.
+The finished-app check additionally validates bundle versioning, required
+resources, nested signatures, sealed resources, and the absence of developer
+library paths. The default ad-hoc signature is useful only for structural
+validation; it is not a Developer ID signature and cannot be notarized.
+
+For a Developer ID candidate, supply the certificate identity only from the
+release environment:
+
+```bash
+SIGNING_IDENTITY="Developer ID Application: Your Organization (TEAMID)" \
+  ./package_app.sh release --version 1.0.0 --build-number 1
+```
+
+This repository neither stores credentials nor submits to Apple's notarization
+service. See `docs/MACOS_RELEASE_BOUNDARIES.md` for the required external
+Developer ID, hardened runtime, notarization, raw-libUSB, and `ptpcamerad`
+steps.
 
 ## Troubleshooting
 
