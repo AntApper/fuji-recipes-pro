@@ -590,6 +590,15 @@ static void ptp_reset_receive_buffer(void) {
     g_ptpRxLength = 0;
 }
 
+/* A USB handle can be released while the camera still owns a PTP session.
+ * Always reset both halves of our local transport state together so a new
+ * connection starts with OpenSession transaction ID 1 and no stale bytes. */
+static void ptp_reset_transport_state(void) {
+    g_sessionOpen = false;
+    g_transactionId = 0;
+    ptp_reset_receive_buffer();
+}
+
 static int ptp_read_exact(libusb_device_handle *dev, uint8_t *output, size_t length) {
     size_t offset = 0;
     while (offset < length) {
@@ -651,6 +660,58 @@ static int ptp_validate_container(const PtpContainer *container,
     if (container->transactionId != expectedTransactionId) {
         return PTP_FRAME_INVALID_TRANSACTION;
     }
+    return LIBUSB_SUCCESS;
+}
+
+/* OpenSession and CloseSession are deliberately handled outside the generic
+ * control helpers: their response container is part of connection lifecycle
+ * correctness.  In particular, never accept a response for a different
+ * transaction after a reconnect. */
+static int ptp_send_session_command(libusb_device_handle *dev, uint16_t operationCode,
+                                    bool hasSessionId, uint16_t *responseCode) {
+    const uint32_t transactionId = ++g_transactionId;
+    const uint32_t commandLength = 12 + (hasSessionId ? 4 : 0);
+    uint8_t command[16] = {0};
+    put_u32_le(command, commandLength);
+    put_u16_le(command + 4, 0x0001);
+    put_u16_le(command + 6, operationCode);
+    put_u32_le(command + 8, transactionId);
+    if (hasSessionId) put_u32_le(command + 12, 1);
+
+    int transferred = 0;
+    int rc = libusb_bulk_transfer(dev, 0x01, command, (int)commandLength,
+                                  &transferred, 5000);
+    if (rc != LIBUSB_SUCCESS || transferred != (int)commandLength) {
+        fprintf(stderr,
+                "[SESSION] 0x%04X command failed: rc=%d transferred=%d expected=%u tx=%u\n",
+                operationCode, rc, transferred, commandLength, transactionId);
+        return rc == LIBUSB_SUCCESS ? PTP_FRAME_SHORT_READ : rc;
+    }
+
+    PtpContainer response;
+    rc = ptp_read_container(dev, &response);
+    if (rc != LIBUSB_SUCCESS) {
+        fprintf(stderr, "[SESSION] 0x%04X response read failed: rc=%d tx=%u\n",
+                operationCode, rc, transactionId);
+        return rc;
+    }
+
+    const int validation = ptp_validate_container(&response, 0x0003,
+                                                   response.code, transactionId);
+    if (validation != LIBUSB_SUCCESS) {
+        fprintf(stderr,
+                "[SESSION] 0x%04X invalid response: type=0x%04X code=0x%04X tx=%u "
+                "(expected type=0x0003 tx=%u, validation=%d)\n",
+                operationCode, response.type, response.code, response.transactionId,
+                transactionId, validation);
+        ptp_container_free(&response);
+        return validation;
+    }
+
+    *responseCode = response.code;
+    fprintf(stderr, "[SESSION] 0x%04X response: type=0x%04X code=0x%04X tx=%u\n",
+            operationCode, response.type, response.code, response.transactionId);
+    ptp_container_free(&response);
     return LIBUSB_SUCCESS;
 }
 
@@ -1196,68 +1257,39 @@ static int do_open_device_attempt(libusb_context *ctx, libusb_device_handle **de
     /* Clear endpoint halts after fresh connection (macOS libusb quirk) */
     clear_endpoint_halt(h, 0x81);
     clear_endpoint_halt(h, 0x01);
-    ptp_reset_receive_buffer();
+    ptp_reset_transport_state();
     usleep(100000);  /* 100ms settle after clear */
 
-    /* OpenSession carries a non-zero SessionID as its first command parameter.
-     * Do not confuse the header transaction ID with that parameter: a zero
-     * SessionID leaves the camera connected but returns 0x2003 SessionNotOpen
-     * for every later property command. Fuji accepts the normal first
-     * transaction ID (1) for OpenSession, matching FilmKit's live protocol. */
-    fprintf(stderr, "[HELPER] Sending OpenSession (required by camera)...\n");
-    uint8_t sessResp[256]; int sessLen = 0;
-    const uint32_t sessionId = 1;
-    const uint32_t sessionTransactionId = ++g_transactionId;
-    uint32_t cmdLen = 12 + 1 * 4;
-    uint8_t cmdBuf[32];
-    memset(cmdBuf, 0, sizeof(cmdBuf));
-    put_u32_le(cmdBuf, cmdLen);
-    put_u16_le(cmdBuf + 4, 0x0001);
-    put_u16_le(cmdBuf + 6, 0x1002);
-    put_u32_le(cmdBuf + 8, sessionTransactionId);
-    put_u32_le(cmdBuf + 12, sessionId);
-    int transferred = 0;
-    rc = libusb_bulk_transfer(h, 0x01, cmdBuf, (int)cmdLen, &transferred, 5000);
-    if (rc != LIBUSB_SUCCESS || transferred != (int)cmdLen) {
-        libusb_release_interface(h, 0);
-        libusb_close(h);
+    /* OpenSession carries a non-zero SessionID. A fresh transport must issue
+     * it as transaction ID 1; ptp_reset_transport_state above guarantees it. */
+    fprintf(stderr, "[HELPER] Sending OpenSession with transaction ID 1...\n");
+    uint16_t sessionResponseCode = 0;
+    rc = ptp_send_session_command(h, 0x1002, true, &sessionResponseCode);
+    if (rc != LIBUSB_SUCCESS) {
+        do_close_device(&h);
         return -3;
     }
-
-    rc = ptp_recv(h, sessResp, sizeof(sessResp), &sessLen);
-    if (rc != LIBUSB_SUCCESS || sessLen < 12) {
-        libusb_release_interface(h, 0);
-        libusb_close(h);
-        return -3;
-    }
-    uint16_t sessRespType = sessResp[4] | (sessResp[5] << 8);
-    uint16_t sessRespCode = sessResp[6] | (sessResp[7] << 8);
-    fprintf(stderr, "[HELPER] OpenSession response: type=0x%04X code=0x%04X\n", sessRespType, sessRespCode);
-    if (sessRespType != 0x0003) {
-        libusb_release_interface(h, 0);
-        libusb_close(h);
-        return -3;
-    }
-    if (sessRespCode == 0x201E && recoverStaleSession) {
-        /* A previous helper process released USB without closing PTP. Mirror
-         * FilmKit's recovery: close the stale session, reset the transport,
-         * then make one clean OpenSession attempt. */
-        fprintf(stderr, "[HELPER] Stale PTP session detected; closing and reopening...\n");
-        uint8_t closeResp[256]; int closeLen = 0;
-        int closeRc = ptp_send(h, 0x1003, 0, NULL);
-        if (closeRc == LIBUSB_SUCCESS) {
-            closeRc = ptp_recv(h, closeResp, sizeof(closeResp), &closeLen);
+    if (sessionResponseCode == 0x201E && recoverStaleSession) {
+        /* A previous helper may have released USB without closing PTP. Close
+         * the stale session, release USB, reset all local state, then retry
+         * exactly once; the retry's OpenSession is again transaction ID 1. */
+        fprintf(stderr, "[HELPER] SessionAlreadyOpen; closing stale session before retry...\n");
+        uint16_t closeResponseCode = 0;
+        int closeRc = ptp_send_session_command(h, 0x1003, false, &closeResponseCode);
+        if (closeRc != LIBUSB_SUCCESS || closeResponseCode != 0x2001) {
+            fprintf(stderr,
+                    "[HELPER] Stale CloseSession was not acknowledged: transport=%d code=0x%04X\n",
+                    closeRc, closeResponseCode);
         }
-        libusb_release_interface(h, 0);
-        libusb_close(h);
-        if (closeRc != LIBUSB_SUCCESS) return -3;
+        do_close_device(&h);
         usleep(500000);
         return do_open_device_attempt(ctx, dev, false);
     }
-    if (sessRespCode != 0x2001) {
-        libusb_release_interface(h, 0);
-        libusb_close(h);
-        return (int)sessRespCode;
+    if (sessionResponseCode != 0x2001) {
+        fprintf(stderr, "[HELPER] OpenSession rejected: code=0x%04X (expected 0x2001)\n",
+                sessionResponseCode);
+        do_close_device(&h);
+        return (int)sessionResponseCode;
     }
 
     g_sessionOpen = true;
@@ -1273,22 +1305,20 @@ static int do_open_device(libusb_context *ctx, libusb_device_handle **dev) {
 static void do_close_device(libusb_device_handle **dev) {
     if (*dev) {
         if (g_sessionOpen) {
-            /* Close the PTP session before releasing USB so the next helper
-             * does not inherit a stale SessionAlreadyOpen state. The response
-             * is best-effort, but consuming it prevents the next OpenSession
-             * from inheriting an unread response on macOS's USB endpoint. */
-            uint8_t closeResponse[256];
-            int closeLength = 0;
-            if (ptp_send(*dev, 0x1003, 0, NULL) == LIBUSB_SUCCESS) {
-                (void)ptp_recv(*dev, closeResponse, sizeof(closeResponse), &closeLength);
+            uint16_t closeResponseCode = 0;
+            int closeRc = ptp_send_session_command(*dev, 0x1003, false,
+                                                    &closeResponseCode);
+            if (closeRc != LIBUSB_SUCCESS || closeResponseCode != 0x2001) {
+                fprintf(stderr,
+                        "[HELPER] CloseSession was not acknowledged: transport=%d code=0x%04X\n",
+                        closeRc, closeResponseCode);
             }
-            g_sessionOpen = false;
         }
         libusb_release_interface(*dev, 0);
         libusb_close(*dev);
         *dev = NULL;
-        ptp_reset_receive_buffer();
     }
+    ptp_reset_transport_state();
 }
 
 /* ── Command Parsing ─────────────────────────────────────────────────── */
@@ -1680,11 +1710,7 @@ int main(int argc, char *argv[]) {
 
         /* ── disconnect ── */
         if (!strcmp(cmd, "disconnect")) {
-            if (dev) {
-                libusb_release_interface(dev, 0);
-                libusb_close(dev);
-                dev = NULL;
-            }
+            do_close_device(&dev);
             fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":\"disconnected\"}\n",
                     json_get_string(line, "id") ? json_get_string(line, "id") : "0");
             fflush(stdout);
@@ -2438,13 +2464,11 @@ int main(int argc, char *argv[]) {
 
         /* ── exit ── */
         if (!strcmp(cmd, "exit")) {
-            if (dev) {
-                libusb_release_interface(dev, 0);
-                libusb_close(dev);
-                dev = NULL;
-            }
-            libusb_exit(ctx);
-            exit(0);
+            do_close_device(&dev);
+            fprintf(stdout, "{\"id\":\"%s\",\"success\":true,\"result\":\"exiting\"}\n",
+                    json_get_string(line, "id") ? json_get_string(line, "id") : "0");
+            fflush(stdout);
+            break;
         }
 
         /* Unknown command */
@@ -2454,10 +2478,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Cleanup */
-    if (dev) {
-        libusb_release_interface(dev, 0);
-        libusb_close(dev);
-    }
+    do_close_device(&dev);
     libusb_exit(ctx);
     return 0;
 }

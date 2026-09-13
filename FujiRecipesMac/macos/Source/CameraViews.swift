@@ -39,8 +39,8 @@ public struct CameraConnectionView: View {
             VStack(alignment: .leading, spacing: 16) {
                 // Section Header
                 SectionHeader(
-                    title: "Camera Telemetry & Sync",
-                    subtitle: "Direct USB-C PTP link to your Fujifilm X100VI for custom dial sync and in-camera RAW processing.",
+                    title: "Camera Preset Sync",
+                    subtitle: "Direct USB-C PTP link to your Fujifilm X100VI for C1–C7 preset sync and in-camera RAW processing.",
                     icon: "camera.fill",
                     trailingValue: manager.status.formattedLabel,
                     trailingLabel: "STATUS",
@@ -206,7 +206,7 @@ public struct CameraConnectionView: View {
             Text(manager.status == .connected ? "Session Active" : (isConnectionInFlight ? "Connecting…" : (manager.status == .error ? "Retry Available" : "Ready to Connect")))
                 .font(.subheadline.weight(.semibold))
                 .glassPrimary()
-            Text(manager.status == .connected ? "Verified USB session. Camera reads and local drafts remain separate." : (isConnectionInFlight ? "Opening a USB PTP session. This can take up to 15 seconds." : "Connect over USB-C to inspect camera state."))
+            Text(manager.status == .connected ? "Verified USB session. C1–C7 preset reads and local drafts remain separate." : (isConnectionInFlight ? "Opening a USB PTP session. This can take up to 15 seconds." : "Connect over USB-C to inspect C1–C7 preset slots."))
                 .font(.caption2)
                 .glassSecondary()
                 .lineLimit(2)
@@ -820,6 +820,10 @@ public struct LimitationsView: View {
                             limitationRow(
                                 title: "Recovery / Settle Delays",
                                 desc: "High-speed 80MB+ RAW transfers utilize automatic PTP session endpoint recovery for maximum link stability."
+                            )
+                            limitationRow(
+                                title: "Live Active Settings",
+                                desc: "USB RAW mode supports C1–C7 preset access, but does not expose the camera’s live active-setting telemetry through this macOS transport."
                             )
                         }
                         .glassCard()

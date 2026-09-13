@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "helper_source": "poc-x100vi-reader/x100vi_helper.c",
-  "helper_source_sha256": "e735f874e556ab001410448b9935de40850fab21cbc70e5507ae4c1d841759cb",
-  "helper_sha256": "f1ad092a47723c316595d5d7b9e4a72e6713a1d9b3608056d4917d662a20e9d8",
+  "helper_source_sha256": "974874cc2abd1687cdc5541f70ad0571a29d39e0209743bb8cd59d83b1a8ea8d",
+  "helper_sha256": "da54517fcb59e830113605788f0b84eab5ea58b28c2a6e5df92ea312c60fccb5",
   "runtime": "libusb-1.0.0.dylib",
   "runtime_sha256": "fd41f0045567cb927f4aabc5e52eeefd32cb7df6b7f5d54964161069918f6e31",
   "architectures": "x86_64 arm64",

@@ -97,10 +97,41 @@ static void test_malformed_length(void) {
            PTP_FRAME_INVALID_LENGTH);
 }
 
+static void test_session_response_validation_and_transport_reset(void) {
+    PtpContainer response = {
+        .length = 12,
+        .type = 0x0003,
+        .code = 0x2001,
+        .transactionId = 1
+    };
+    assert(ptp_validate_container(&response, 0x0003, 0x2001, 1) == LIBUSB_SUCCESS);
+
+    response.type = 0x0002;
+    assert(ptp_validate_container(&response, 0x0003, 0x2001, 1) ==
+           PTP_FRAME_INVALID_TYPE);
+    response.type = 0x0003;
+    response.code = 0x2003;
+    assert(ptp_validate_container(&response, 0x0003, 0x2001, 1) ==
+           PTP_FRAME_INVALID_CODE);
+    response.code = 0x2001;
+    response.transactionId = 2;
+    assert(ptp_validate_container(&response, 0x0003, 0x2001, 1) ==
+           PTP_FRAME_INVALID_TRANSACTION);
+
+    g_sessionOpen = true;
+    g_transactionId = 27;
+    g_ptpRxLength = 8;
+    ptp_reset_transport_state();
+    assert(!g_sessionOpen);
+    assert(g_transactionId == 0);
+    assert(g_ptpRxLength == 0);
+}
+
 int main(void) {
     test_handle_payloads();
     test_fragmented_data_then_response();
     test_malformed_length();
+    test_session_response_validation_and_transport_reset();
     puts("PTP framing fixture tests passed");
     return 0;
 }

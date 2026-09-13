@@ -1,12 +1,18 @@
 # macOS Release Boundaries
 
-This repository can build and validate a development macOS application, but it
-is not currently ready for Developer ID distribution or the Mac App Store.
+This repository can build a Developer ID signing candidate and validate its
+local bundle evidence. It cannot prove notarization, distribute a release, or
+make raw USB camera access reliable without the external Apple account,
+certificate, and hardware steps described below.
 
 ## Current development boundary
 
 - The macOS app launches a bundled `x100vi_helper` executable that uses raw
-  libusb access to communicate with an X100VI.
+  libusb access to communicate with an X100VI. Release packaging places the
+  helper in `Fuji Recipes.app/Contents/Resources`, alongside its bundled
+  libusb dylib; the finished-bundle validator rejects a missing or
+  developer-path-linked copy. The transport's broader development fallback
+  search remains outside this packaging-only readiness work.
 - `ptpcamerad` may claim the USB PTP interface. Development testing currently
   requires stopping that service before the helper can claim the device.
 - The helper now loads a bundled `libusb-1.0.0.dylib` through
@@ -19,13 +25,54 @@ is not currently ready for Developer ID distribution or the Mac App Store.
   14.0. A locally installed Homebrew libusb can be arm64-only and built for a
   newer macOS; that input is intentionally rejected by the release gate.
 
+## What the credential-free checks prove
+
+`scripts/verify-macos-app-bundle.sh` validates a completed `.app` bundle:
+
+- concrete bundle identifier, marketing version, and numeric build number;
+- the expected helper, libusb runtime, provenance manifest, and license notice;
+- bundled provenance hashes, `arm64`/`x86_64` coverage when requested, and a
+  macOS 14.0-or-earlier deployment target;
+- no Homebrew or `/Users/...` load commands/rpaths in the executable, helper,
+  or libusb runtime; and
+- strict app and nested-code signature/resource-seal verification.
+
+It can additionally require Developer ID Application authorities and hardened
+runtime flags, but it never calls Apple's notarization service. An ad-hoc
+signature can pass the structural check and is explicitly **not** a
+distributable signature.
+
+For a local candidate bundle:
+
+```bash
+cd FujiRecipesMac/macos
+./package_app.sh release --version 1.0.0 --build-number 1
+```
+
+For an externally provisioned Developer ID candidate:
+
+```bash
+SIGNING_IDENTITY="Developer ID Application: Your Organization (TEAMID)" \
+  ./package_app.sh release --version 1.0.0 --build-number 1
+scripts/verify-macos-app-bundle.sh \
+  --app "build/Fuji Recipes.app" \
+  --require-universal --require-developer-id \
+  --expected-version 1.0.0 --expected-build 1
+```
+
+The package script builds both architectures for Release. It is a SwiftPM
+packaging smoke-test, not an `.xcarchive`/installer producer; use Xcode
+Archive or a dedicated external release workflow when creating the artifact
+submitted to Apple.
+
 ## Distribution status
 
 - **Local development:** Supported for engineering validation when a compatible
   helper, libusb runtime, and direct USB access are available.
-- **Developer ID:** Not supported yet. It requires a signed distribution design
-  for the helper and dependencies, plus Developer ID credentials and
-  notarization.
+- **Developer ID:** The repository can prepare and locally validate a signing
+  candidate. Actual distribution remains blocked on an Apple-issued Developer
+  ID Application certificate, hardened-runtime signing, timestamping,
+  notarization, staple verification, and hardware testing.
 - **Mac App Store:** Not supported. The raw libusb/helper process and
   `ptpcamerad` conflict have not been shown to work within the App Sandbox or
   its entitlement model.
@@ -34,20 +81,40 @@ is not currently ready for Developer ID distribution or the Mac App Store.
 
 ## Notarization
 
-Notarization is intentionally outside repository CI. It requires an Apple
-Developer account, a Developer ID Application certificate, an App Store
-Connect API key or app-specific password, and a signed, archiveable release
-artifact. Do not add those credentials to this repository or its workflows.
+Notarization is intentionally outside repository CI. It requires an enrolled
+Apple Developer Program team, a Developer ID Application certificate and
+private key in the signing keychain, a timestamp-capable signing environment,
+and either an App Store Connect API key or app-specific password. The final
+signed archive must be submitted with `notarytool`, accepted by Apple, stapled,
+then assessed on a clean macOS installation. Do not add those credentials,
+private keys, API keys, or passwords to this repository or its workflows.
+
+Enabling `ENABLE_HARDENED_RUNTIME` in the Release target only configures the
+build requirement. It does not sign the application, grant USB access, or
+establish notarization acceptance.
+
+## Raw libusb / PTP platform caveat
+
+The current camera transport claims the USB PTP interface directly through
+libusb. On macOS, `ptpcamerad` can automatically claim that same interface;
+development testing has sometimes required manually stopping it. This is an
+operational limitation, not a shipping solution. The behavior has not been
+validated under App Sandbox restrictions and may require a different transport
+or privileged/system integration for dependable distribution. No camera-access
+claim is made by the credential-free packaging checks.
 
 ## Required evidence before a public macOS release
 
 1. Supply a redistributable universal libusb dylib built for macOS 14.0 or
    earlier, then rebuild the helper with `scripts/build-macos-helper.sh`.
-2. Verify the helper's architecture coverage and camera behavior on supported
+2. Archive the final app, sign all nested code with Developer ID Application
+   plus hardened runtime, then run the finished-bundle check with
+   `--require-developer-id`.
+3. Submit the signed archive to Apple, wait for accepted notarization, staple
+   the resulting ticket, and independently assess the stapled artifact.
+4. Verify the helper's architecture coverage and camera behavior on supported
    Intel and Apple Silicon machines.
-3. Define and test a signed, sandbox-compatible distribution design, or
+5. Define and test a signed, sandbox-compatible distribution design, or
    explicitly limit distribution to a non-App-Store channel.
-4. Validate camera behavior without relying on manually killing
+6. Validate camera behavior without relying on manually killing
    `ptpcamerad`.
-5. Complete notarized release testing using externally managed Apple
-   credentials.

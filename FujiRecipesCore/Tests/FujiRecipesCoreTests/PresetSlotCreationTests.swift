@@ -227,6 +227,37 @@ final class PresetSlotCreationTests: XCTestCase {
     }
 
     @MainActor
+    func testCameraManagerReportsUnsupportedActiveTelemetryExplicitly() async {
+        let client = RecordingPTPClient()
+        let manager = CameraManager()
+
+        await manager.connect(using: client)
+
+        XCTAssertEqual(
+            manager.activeSettingsState,
+            .unavailable(.unsupportedInUSBRAWMode)
+        )
+        XCTAssertNil(manager.activeSettingsState.settings)
+    }
+
+    @MainActor
+    func testCameraManagerRetainsAvailableActiveTelemetry() async {
+        let client = RecordingPTPClient(propertyResponses: [
+            0xD001: .uint32(7),
+            0x500F: .uint32(400)
+        ])
+        let manager = CameraManager()
+
+        await manager.connect(using: client)
+
+        XCTAssertEqual(
+            manager.activeSettingsState,
+            .available(["FilmSim": UInt32(7), "ISO": UInt32(400)])
+        )
+        XCTAssertEqual(manager.activeSettingsState.settings?["FilmSim"], UInt32(7))
+    }
+
+    @MainActor
     func testSlotRefreshReportsPartialFailuresWithoutFabricatingSlots() async {
         let client = RecordingPTPClient(readFailures: [2, 6])
         let manager = CameraManager()
@@ -248,17 +279,20 @@ private final class RecordingPTPClient: PTPClientProtocol, @unchecked Sendable {
     let connectError: Error?
     let readFailures: Set<Int>
     let preset: PTPClientPresetData?
+    let propertyResponses: [UInt16: PTPPropertyResponse]
     private var writeErrors: [Error?]
 
     init(
         connectError: Error? = nil,
         readFailures: Set<Int> = [],
         preset: PTPClientPresetData? = nil,
+        propertyResponses: [UInt16: PTPPropertyResponse] = [:],
         writeErrors: [Error?] = []
     ) {
         self.connectError = connectError
         self.readFailures = readFailures
         self.preset = preset
+        self.propertyResponses = propertyResponses
         self.writeErrors = writeErrors
     }
 
@@ -267,7 +301,9 @@ private final class RecordingPTPClient: PTPClientProtocol, @unchecked Sendable {
         isConnected = true
     }
     func disconnect() { isConnected = false }
-    func readProperty(_ code: UInt16) async throws -> PTPPropertyResponse { .unsupported }
+    func readProperty(_ code: UInt16) async throws -> PTPPropertyResponse {
+        propertyResponses[code] ?? .unsupported
+    }
     func writeProperty(_ code: UInt16, value: Int32) async throws {}
     func readPresetSlot(_ index: Int) async throws -> PTPClientPresetData {
         if readFailures.contains(index) {
