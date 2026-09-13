@@ -12,7 +12,8 @@ permissions:
 jobs:
   core:
     name: Core tests
-    runs-on: macos-14
+    # macOS 15 images provide Xcode 16+/Swift 6, required by project format 77.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Run FujiRecipesCore tests
@@ -20,7 +21,7 @@ jobs:
 
   ptp:
     name: PTP build and tests
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Install PTP test dependency
@@ -34,7 +35,7 @@ jobs:
 
   macos-project:
     name: macOS project validation
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Validate workspace and project metadata
@@ -52,7 +53,7 @@ jobs:
 
   release-inputs:
     name: Release bundle evidence
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Verify helper resource and runtime provenance
