@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "exportDate": "2026-07-06T00:27:57.343111+00:00",
+  "exportDate": "2026-09-12T23:57:57.719426+00:00",
   "camera": {
     "model": "X100VI",
     "sensorGeneration": "X-Trans V",
@@ -256,11 +256,12 @@
       "description": "Color space: 1=sRGB, 2=AdobeRGB"
     }
   },
-  "recipeCount": 22,
+  "recipeCount": 23,
   "recipes": [
     {
       "id": "pro-negative-160c",
       "name": "PRO Negative 160C",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Reala Ace",
       "filmSimEnum": 20,
@@ -313,6 +314,9 @@
         "whiteBalance": 2
       },
       "sourceUrl": "https://fujixweekly.com/2024/03/27/pro-negative-160c-fujifilm-x100vi-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/03/53611015573_59ac5c3f85_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/03/53611015573_59ac5c3f85_h.jpg?resize=1000%2C667&ssl=1",
@@ -339,11 +343,42 @@
       "date": "March 27, 2024",
       "compatibleCameras": [
         "X100VI"
+      ],
+      "tags": [
+        "Camera blog",
+        "Camera Settings",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Film Simulation Settings",
+        "Fuji blog",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fuji X100VI",
+        "Fujicolor",
+        "Fujicolor Pro 160",
+        "Fujicolor PRO 160C",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm camera settings",
+        "Fujifilm Film Simulation",
+        "Fujifilm Reala Ace",
+        "Fujifilm recipes",
+        "Fujifilm X100VI",
+        "Fujifilm X100VI blog",
+        "Fujifilm X100VI settings",
+        "Photography blog",
+        "Reala Ace",
+        "Reala Ace film simulation"
       ]
     },
     {
       "id": "easy-reala-ace",
       "name": "Easy Reala Ace",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Reala Ace",
       "filmSimEnum": 20,
@@ -396,6 +431,9 @@
         "whiteBalance": 2
       },
       "sourceUrl": "https://fujixweekly.com/2024/06/20/easy-reala-ace-fujifilm-x100vi-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/06/53803157289_47f44a95b1_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/06/53803157289_47f44a95b1_h.jpg?resize=1000%2C667&ssl=1",
@@ -422,11 +460,36 @@
       "date": "June 20, 2024",
       "compatibleCameras": [
         "X100VI"
+      ],
+      "tags": [
+        "Camera blog",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Film Simulation Settings",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm recipes",
+        "Fujifilm X100VI",
+        "Fujifilm X100VI blog",
+        "Nathalie Boucry",
+        "Photography blog",
+        "Reala Ace",
+        "Reala Ace film simulation"
       ]
     },
     {
       "id": "fujicolor-film",
       "name": "Fujicolor Film",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Reala Ace",
       "filmSimEnum": 20,
@@ -459,7 +522,8 @@
         "exposureCompensation": 666,
         "colorTemp": 5500,
         "wbShiftRed": -1.0,
-        "wbShiftBlue": -1.0
+        "wbShiftBlue": -1.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 20,
@@ -474,9 +538,13 @@
         "highIsoNr": 32768,
         "colorTemp": 5500,
         "wbShiftRed": -1.0,
-        "wbShiftBlue": -1.0
+        "wbShiftBlue": -1.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2024/09/18/fujicolor-film-fujifilm-x100vi-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/09/54001699767_070e0de816_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/09/54001699767_070e0de816_h.jpg?resize=1000%2C667&ssl=1",
@@ -503,11 +571,34 @@
       "date": "September 18, 2024",
       "compatibleCameras": [
         "X100VI"
+      ],
+      "tags": [
+        "Camera blog",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm Reala Ace",
+        "Fujifilm recipes",
+        "Fujifilm X100VI",
+        "Photography blog",
+        "Reala Ace",
+        "Reala Ace film simulation",
+        "Reala Ace Recipe"
       ]
     },
     {
       "id": "fujicolor-100-industrial",
       "name": "Fujicolor 100 Industrial",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Reala Ace",
       "filmSimEnum": 20,
@@ -539,7 +630,8 @@
         "exposureCompensation": 0,
         "colorTemp": 3100,
         "wbShiftRed": 8.0,
-        "wbShiftBlue": -8.0
+        "wbShiftBlue": -8.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 20,
@@ -553,9 +645,13 @@
         "highIsoNr": 32768,
         "colorTemp": 3100,
         "wbShiftRed": 8.0,
-        "wbShiftBlue": -8.0
+        "wbShiftBlue": -8.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2024/04/05/fujicolor-100-industrial-fujifilm-x100vi-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/04/53630964175_de4c5f43cb_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/04/53630964175_de4c5f43cb_h.jpg?resize=1000%2C667&ssl=1",
@@ -582,11 +678,38 @@
       "date": "April 5, 2024",
       "compatibleCameras": [
         "X100VI"
+      ],
+      "tags": [
+        "Camera blog",
+        "Camera Settings",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Film Simulation Settings",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fuji X100VI",
+        "Fujicolor 100 Industrial",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm camera settings",
+        "Fujifilm Film Simulation",
+        "Fujifilm Reala Ace",
+        "Fujifilm X100VI",
+        "Fujifilm X100VI blog",
+        "Photography blog",
+        "Reala Ace",
+        "Reala Ace film simulation",
+        "X100VI"
       ]
     },
     {
       "id": "kodak-gold-max-400-expired",
       "name": "Kodak Gold Max 400 Expired",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Reala Ace",
       "filmSimEnum": 20,
@@ -618,7 +741,8 @@
         "exposureCompensation": 999,
         "colorTemp": 6700,
         "wbShiftRed": 1.0,
-        "wbShiftBlue": 4.0
+        "wbShiftBlue": 4.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 20,
@@ -632,9 +756,13 @@
         "highIsoNr": 32768,
         "colorTemp": 6700,
         "wbShiftRed": 1.0,
-        "wbShiftBlue": 4.0
+        "wbShiftBlue": 4.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2024/12/31/kodak-gold-max-400-expired-fujifilm-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/12/54238326279_b8c02ca3a2_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/12/54238326279_b8c02ca3a2_h.jpg?resize=1000%2C667&ssl=1",
@@ -664,11 +792,36 @@
         "X-S20",
         "X100VI",
         "GFX100S II"
+      ],
+      "tags": [
+        "Camera blog",
+        "Expired film",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji",
+        "Fuji blog",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm Film Simulations",
+        "Fujifilm Reala Ace",
+        "Kodak Gold Max 400",
+        "Photography blog",
+        "Reala Ace",
+        "Reala Ace film simulation",
+        "Reala Ace Recipe"
       ]
     },
     {
       "id": "appalachian-negative",
       "name": "Appalachian Negative",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Nostalgic Neg.",
       "filmSimEnum": 19,
@@ -701,7 +854,8 @@
         "exposureCompensation": 999,
         "colorTemp": 5200,
         "wbShiftRed": 2.0,
-        "wbShiftBlue": -2.0
+        "wbShiftBlue": -2.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 19,
@@ -716,9 +870,13 @@
         "highIsoNr": 32768,
         "colorTemp": 5200,
         "wbShiftRed": 2.0,
-        "wbShiftBlue": -2.0
+        "wbShiftBlue": -2.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2024/06/18/appalachian-negative-fujifilm-x100vi-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/06/53763354128_376df0c118_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/06/53763354128_376df0c118_h.jpg?resize=1000%2C667&ssl=1",
@@ -745,11 +903,42 @@
       "date": "June 18, 2024",
       "compatibleCameras": [
         "X100VI"
+      ],
+      "tags": [
+        "California photography",
+        "Camera blog",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Film Simulation Settings",
+        "Fuji blog",
+        "Fuji X Weekly",
+        "Fuji X Weekly app",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm Nostalgic Neg",
+        "Fujifilm Nostalgic Negative",
+        "Fujifilm recipes",
+        "Fujifilm X100VI",
+        "Fujifilm X100VI blog",
+        "Logan Ballew",
+        "Los Angeles",
+        "Nostalgic Neg",
+        "Nostalgic Negative",
+        "Nostalgic Negative film simulation",
+        "Nostalgic Negative film simulation recipe",
+        "Photography blog"
       ]
     },
     {
       "id": "summer-of-59-a-fujifilm-recipe-for-fifth-generation-cameras",
       "name": "Summer of '59 - A Fujifilm Recipe for Fifth-Generation Cameras",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Eterna",
       "filmSimEnum": 16,
@@ -800,6 +989,9 @@
         "whiteBalance": 2
       },
       "sourceUrl": "https://fujixweekly.com/2026/05/02/summer-of-59-a-fujifilm-recipe-for-fifth-generation-cameras/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/03/53570506470_882175348e_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/03/53570506470_882175348e_h.jpg?resize=1000%2C667&ssl=1",
@@ -827,11 +1019,36 @@
       "compatibleCameras": [
         "X-T5",
         "X100VI"
+      ],
+      "tags": [
+        "Camera blog",
+        "Eterna Film Simulation",
+        "Eterna recipe",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fuji X Weekly Recipe",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm recipes",
+        "Fujifilm X-T5",
+        "Fujifilm X100VI",
+        "Photography blog",
+        "Saul Leiter"
       ]
     },
     {
       "id": "summer-sun",
       "name": "Summer Sun",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Reala Ace",
       "filmSimEnum": 20,
@@ -865,7 +1082,8 @@
         "exposureCompensation": 333,
         "colorTemp": 7200,
         "wbShiftRed": -2.0,
-        "wbShiftBlue": 2.0
+        "wbShiftBlue": 2.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 20,
@@ -881,9 +1099,13 @@
         "highIsoNr": 32768,
         "colorTemp": 7200,
         "wbShiftRed": -2.0,
-        "wbShiftBlue": 2.0
+        "wbShiftBlue": 2.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2025/06/27/summer-sun-fujifilm-x-e5-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/06/54616612893_abcf31474b_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/06/54616612893_abcf31474b_h.jpg?resize=1000%2C667&ssl=1",
@@ -912,11 +1134,38 @@
         "X-S20",
         "X100VI",
         "X-E5"
+      ],
+      "tags": [
+        "Camera blog",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fuji X Weekly Recipe",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm Reala Ace",
+        "Fujifilm X-E5",
+        "Fujifilm X-S20",
+        "Fujifilm X100VI",
+        "Kodak Ultra Color 100UC",
+        "Photography blog",
+        "Reala Ace",
+        "Reala Ace film simulation",
+        "Reala Ace Recipe",
+        "Summer"
       ]
     },
     {
       "id": "california-summer",
       "name": "California Summer",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Nostalgic Neg.",
       "filmSimEnum": 19,
@@ -950,7 +1199,8 @@
         "exposureCompensation": 999,
         "colorTemp": 6700,
         "wbShiftRed": -1.0,
-        "wbShiftBlue": -6.0
+        "wbShiftBlue": -6.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 19,
@@ -966,9 +1216,13 @@
         "highIsoNr": 32768,
         "colorTemp": 6700,
         "wbShiftRed": -1.0,
-        "wbShiftBlue": -6.0
+        "wbShiftBlue": -6.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2024/06/04/california-summer-fujifilm-x100vi-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/06/53763542094_f0662f669d_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/06/53763542094_f0662f669d_h.jpg?resize=1000%2C667&ssl=1",
@@ -997,11 +1251,44 @@
         "X-T5",
         "X100VI",
         "X-T50"
+      ],
+      "tags": [
+        "California",
+        "California Summer",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Film Simulation Settings",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly app",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fuji X100VI",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm Nostalgic Neg",
+        "Fujifilm Nostalgic Negative",
+        "Fujifilm recipes",
+        "Fujifilm X-T50",
+        "Fujifilm X100VI",
+        "Fujifilm X100VI blog",
+        "Nostalgic Neg",
+        "Nostalgic Negative",
+        "Nostalgic Negative film simulation",
+        "Nostalgic Negative film simulation recipe",
+        "Photography blog",
+        "Preet",
+        "Sedona Arizona"
       ]
     },
     {
       "id": "texas-sun",
       "name": "Texas Sun",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Classic Chrome",
       "filmSimEnum": 11,
@@ -1034,7 +1321,8 @@
         "exposureCompensation": 666,
         "colorTemp": 6500,
         "wbShiftRed": 2.0,
-        "wbShiftBlue": -6.0
+        "wbShiftBlue": -6.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 11,
@@ -1049,9 +1337,13 @@
         "highIsoNr": 32768,
         "colorTemp": 6500,
         "wbShiftRed": 2.0,
-        "wbShiftBlue": -6.0
+        "wbShiftBlue": -6.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2024/12/04/texas-sun-fujifilm-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/12/54183229451_c2fc0c6173_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/12/54183229451_c2fc0c6173_h.jpg?resize=1000%2C667&ssl=1",
@@ -1080,11 +1372,36 @@
         "X-H2",
         "X-H2S",
         "X100VI"
+      ],
+      "tags": [
+        "Camera blog",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm recipes",
+        "Fujifilm X100VI",
+        "Fujifilm X100VI blog",
+        "Jay Ybarra",
+        "New York City",
+        "New York City Photography",
+        "Photography blog",
+        "Portra Recipe",
+        "Texas Sun Recipe"
       ]
     },
     {
       "id": "kodak-farbwelt-200-expired-a-fujifilm-film-simulation-recipe-for-x-trans-v-cameras",
       "name": "Kodak Farbwelt 200 Expired - A Fujifilm Film Simulation Recipe for X-Trans V Cameras",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Classic Chrome",
       "filmSimEnum": 11,
@@ -1118,7 +1435,8 @@
         "exposureCompensation": -666,
         "colorTemp": 7500,
         "wbShiftRed": 1.0,
-        "wbShiftBlue": -4.0
+        "wbShiftBlue": -4.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 11,
@@ -1134,9 +1452,13 @@
         "highIsoNr": 32768,
         "colorTemp": 7500,
         "wbShiftRed": 1.0,
-        "wbShiftBlue": -4.0
+        "wbShiftBlue": -4.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2025/12/09/kodak-farbwelt-200-expired-a-fujifilm-film-simulation-recipe-for-x-trans-v-cameras/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/12/54971481467_9b2c4c98bc_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/12/54971481467_9b2c4c98bc_h.jpg?resize=1000%2C667&ssl=1",
@@ -1167,11 +1489,38 @@
         "X100VI",
         "X-E5",
         "GFX100S II"
+      ],
+      "tags": [
+        "Camera blog",
+        "Classic Chrome",
+        "Classic Chrome Recipe",
+        "Classic Chrome settings",
+        "Expired film",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fuji X Weekly Recipe",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Classic Chrome",
+        "Fujifilm Film Simulation",
+        "Kodak Gold 200",
+        "Kodak recipes",
+        "Photography blog",
+        "Thomas Schwab"
       ]
     },
     {
       "id": "kodak-pro-400",
       "name": "Kodak Pro 400",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Reala Ace",
       "filmSimEnum": 20,
@@ -1205,7 +1554,8 @@
         "exposureCompensation": 666,
         "colorTemp": 5200,
         "wbShiftRed": 2.0,
-        "wbShiftBlue": -3.0
+        "wbShiftBlue": -3.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 20,
@@ -1221,9 +1571,13 @@
         "highIsoNr": 32768,
         "colorTemp": 5200,
         "wbShiftRed": 2.0,
-        "wbShiftBlue": -3.0
+        "wbShiftBlue": -3.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2025/09/06/kodak-pro-400-fujifilm-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/09/54766332405_c549b680bf_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/09/54766332405_c549b680bf_h.jpg?resize=1000%2C667&ssl=1",
@@ -1251,11 +1605,35 @@
       "compatibleCameras": [
         "X-T5",
         "X100VI"
+      ],
+      "tags": [
+        "Camera blog",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fuji X Weekly Recipe",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm X-T5",
+        "Fujifilm X100VI",
+        "Kodak Portra 400",
+        "Photography blog",
+        "Reala Ace",
+        "Reala Ace film simulation"
       ]
     },
     {
       "id": "classic-color",
       "name": "Classic Color",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Classic Chrome",
       "filmSimEnum": 11,
@@ -1287,7 +1665,8 @@
         "exposureCompensation": 666,
         "colorTemp": 5300,
         "wbShiftRed": 0.0,
-        "wbShiftBlue": -6.0
+        "wbShiftBlue": -6.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 11,
@@ -1301,9 +1680,13 @@
         "highIsoNr": 32768,
         "colorTemp": 5300,
         "wbShiftRed": 0.0,
-        "wbShiftBlue": -6.0
+        "wbShiftBlue": -6.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2024/04/22/classic-color-fujifilm-x-t5-x-trans-v-and-x-e4-x-trans-iv-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/04/53597872816_c00d59f55f_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/04/53597872816_c00d59f55f_h.jpg?resize=1000%2C667&ssl=1",
@@ -1331,11 +1714,37 @@
       "compatibleCameras": [
         "X-T5",
         "X100VI"
+      ],
+      "tags": [
+        "Classic Chrome",
+        "Classic Chrome film simulation",
+        "Classic Chrome Recipe",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Film Simulation Settings",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm camera settings",
+        "Fujifilm Film Simulation",
+        "Fujifilm recipes",
+        "Fujifilm X-E4",
+        "Fujifilm X-T5",
+        "Fujifilm X100VI",
+        "Kodak Portra 400 v2"
       ]
     },
     {
       "id": "kodacolor-vr-200",
       "name": "Kodacolor VR 200",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Classic Chrome",
       "filmSimEnum": 11,
@@ -1367,7 +1776,8 @@
         "exposureCompensation": 333,
         "colorTemp": 3000,
         "wbShiftRed": 8.0,
-        "wbShiftBlue": -8.0
+        "wbShiftBlue": -8.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 11,
@@ -1381,9 +1791,13 @@
         "highIsoNr": 32768,
         "colorTemp": 3000,
         "wbShiftRed": 8.0,
-        "wbShiftBlue": -8.0
+        "wbShiftBlue": -8.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2025/04/16/kodacolor-vr-200-fujifilm-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/04/54424595075_05d17a48d2_h.jpg?resize=1000%2C666&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/04/54424595075_05d17a48d2_h.jpg?resize=1000%2C666&ssl=1",
@@ -1412,11 +1826,36 @@
         "X-S20",
         "X100VI",
         "GFX100S II"
+      ],
+      "tags": [
+        "Camera blog",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm GFX100S II",
+        "Fujifilm recipes",
+        "Fujifilm X-S20",
+        "Fujifilm X100VI",
+        "Kodacolor",
+        "Kodacolor VR 200",
+        "Photography blog",
+        "Thomas Schwab"
       ]
     },
     {
       "id": "cinestill-800t",
       "name": "CineStill 800T",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Eterna",
       "filmSimEnum": 16,
@@ -1467,6 +1906,9 @@
         "wbShiftBlue": -4.0
       },
       "sourceUrl": "https://fujixweekly.com/2024/04/16/cinestill-800t-fujifilm-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2023/07/53053380233_de889b254c_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2023/07/53053380233_de889b254c_h.jpg?resize=1000%2C667&ssl=1",
@@ -1494,11 +1936,37 @@
       "compatibleCameras": [
         "X-T5",
         "X100VI"
+      ],
+      "tags": [
+        "CineStill 800T",
+        "Eterna Film Simulation",
+        "Eterna recipe",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Film Simulation Settings",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm camera settings",
+        "Fujifilm Film Simulation",
+        "Fujifilm recipes",
+        "Fujifilm X-T5",
+        "Fujifilm X100VI",
+        "Photography blog",
+        "X-Trans V"
       ]
     },
     {
       "id": "redscale",
       "name": "RedScale",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Classic Negative",
       "filmSimEnum": 17,
@@ -1531,7 +1999,8 @@
         "highIsoNr": 0.0,
         "exposureCompensation": 333,
         "wbShiftRed": 9.0,
-        "wbShiftBlue": -9.0
+        "wbShiftBlue": -9.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 17,
@@ -1546,9 +2015,13 @@
         "clarity": -30.0,
         "highIsoNr": 32768,
         "wbShiftRed": 9.0,
-        "wbShiftBlue": -9.0
+        "wbShiftBlue": -9.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2025/02/18/redscale-fujifilm-x-trans-iv-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/02/54335042673_4b13cd16a1_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/02/54335042673_4b13cd16a1_h.jpg?resize=1000%2C667&ssl=1",
@@ -1576,11 +2049,38 @@
       "compatibleCameras": [
         "X100VI",
         "GFX100S II"
+      ],
+      "tags": [
+        "Camera blog",
+        "classic negative",
+        "Classic Negative film simulation",
+        "Classic Negative Recipe",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Classic Negative",
+        "Fujifilm Film Simulation",
+        "Fujifilm X-E4",
+        "Fujifilm X100VI",
+        "Harman Red",
+        "Photography blog",
+        "Redscale",
+        "Redscale photography",
+        "Redscale simulation"
       ]
     },
     {
       "id": "vintage-cinema",
       "name": "Vintage Cinema",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Nostalgic Neg.",
       "filmSimEnum": 19,
@@ -1614,7 +2114,8 @@
         "exposureCompensation": -1332,
         "colorTemp": 4900,
         "wbShiftRed": 3.0,
-        "wbShiftBlue": 3.0
+        "wbShiftBlue": 3.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "filmSimulation": 19,
@@ -1630,9 +2131,13 @@
         "highIsoNr": 32768,
         "colorTemp": 4900,
         "wbShiftRed": 3.0,
-        "wbShiftBlue": 3.0
+        "wbShiftBlue": 3.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2024/06/07/vintage-cinema-fujifilm-x-t5-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2023/01/52650700965_2db61ddd24_c.jpg?resize=799%2C533&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2023/01/52650700965_2db61ddd24_c.jpg?resize=799%2C533&ssl=1",
@@ -1660,11 +2165,39 @@
       "compatibleCameras": [
         "X-T5",
         "X100VI"
+      ],
+      "tags": [
+        "Camera blog",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Film Simulation Settings",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm Nostalgic Neg",
+        "Fujifilm Nostalgic Negative",
+        "Fujifilm recipes",
+        "Fujifilm X-T5",
+        "Fujifilm X100VI",
+        "Nostalgic Neg",
+        "Nostalgic Negative",
+        "Nostalgic Negative film simulation",
+        "Nostalgic Negative film simulation recipe",
+        "Photography blog"
       ]
     },
     {
       "id": "universal-negative-14-fujifilm-x100vi-x-trans-v-film-simulation-recipes-yes-14",
       "name": "Universal Negative - 14 Fujifilm X100VI (X-Trans V) Film Simulation Recipes (Yes, 14!!)",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Any (See Below)",
       "filmSimEnum": null,
@@ -1697,7 +2230,8 @@
         "exposureCompensation": 0,
         "colorTemp": 4000,
         "wbShiftRed": 0.0,
-        "wbShiftBlue": -5.0
+        "wbShiftBlue": -5.0,
+        "whiteBalance": 32775
       },
       "presetSettings": {
         "dynamicRange": 400,
@@ -1712,9 +2246,13 @@
         "highIsoNr": 32768,
         "colorTemp": 4000,
         "wbShiftRed": 0.0,
-        "wbShiftBlue": -5.0
+        "wbShiftBlue": -5.0,
+        "whiteBalance": 32775
       },
       "sourceUrl": "https://fujixweekly.com/2025/03/28/universal-negative-14-fujifilm-x100vi-x-trans-v-film-simulation-recipes-yes-14/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/10/54035351127_1b2ad2a14a_h.jpg?resize=1000%2C668&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/10/54035351127_1b2ad2a14a_h.jpg?resize=1000%2C668&ssl=1",
@@ -1741,11 +2279,37 @@
       "date": "March 28, 2025",
       "compatibleCameras": [
         "X100VI"
+      ],
+      "tags": [
+        "Camera blog",
+        "Camera Settings",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fuji X Weekly Recipe",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm recipes",
+        "Fujifilm settings",
+        "Fujifilm X100VI",
+        "Fujifilm X100VI blog",
+        "Fujifilm X100VI Recipe",
+        "Photography blog",
+        "Universal Recipe"
       ]
     },
     {
       "id": "kodak-plus-x-125",
       "name": "Kodak Plus-X 125",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Acros (including +Ye, +R, or +G)",
       "filmSimEnum": 12,
@@ -1795,6 +2359,9 @@
         "whiteBalance": 4
       },
       "sourceUrl": "https://fujixweekly.com/2025/09/21/kodak-plus-x-125-fujifilm-x-trans-iv-x-trans-v-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/09/54798793760_d950cdfc74_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/09/54798793760_d950cdfc74_h.jpg?resize=1000%2C667&ssl=1",
@@ -1821,11 +2388,34 @@
         "X-T5",
         "X100VI",
         "GFX100S II"
+      ],
+      "tags": [
+        "Acros",
+        "Acros Film Simulation",
+        "Acros Film Simulation recipe",
+        "Acros Recipes",
+        "B&W",
+        "Black and white",
+        "Black and white photography",
+        "Camera blog",
+        "Film Simulation",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fuji X Weekly Recipe",
+        "Fujifilm",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Kodak Plus-X 125",
+        "Photography blog"
       ]
     },
     {
       "id": "kodak-t-max-100-soft-tone-a-film-simulation-recipe-for-fujifilm-x-trans-iv-x-trans-v-cameras-part-2",
       "name": "Kodak T-Max 100 Soft Tone - A Film Simulation Recipe for Fujifilm X-Trans IV & X-Trans V Cameras (Part 2)",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Monochrome+G",
       "filmSimEnum": 9,
@@ -1871,6 +2461,9 @@
         "whiteBalance": 4
       },
       "sourceUrl": "https://fujixweekly.com/2024/10/07/kodak-t-max-100-soft-tone-a-film-simulation-recipe-for-fujifilm-x-trans-iv-x-trans-v-cameras-part-2/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/10/54049764816_aecbbae9a5_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/10/54049764816_aecbbae9a5_h.jpg?resize=1000%2C667&ssl=1",
@@ -1898,11 +2491,39 @@
       "compatibleCameras": [
         "X-T5",
         "X100VI"
+      ],
+      "tags": [
+        "B&W Recipes",
+        "Black and white",
+        "Black and white photography",
+        "Camera blog",
+        "Dan Allen",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm black and white",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm recipes",
+        "Kodak T-Max 100",
+        "Monochrome",
+        "Monochrome film simulation",
+        "Monochrome film simulation recipe",
+        "Monochrome film simulation settings",
+        "Photography blog"
       ]
     },
     {
       "id": "kodak-t-max-100-hard-tone-a-film-simulation-recipe-for-fujifilm-x-trans-iv-x-trans-v-cameras-part-1",
       "name": "Kodak T-Max 100 Hard Tone - A Film Simulation Recipe for Fujifilm X-Trans IV & X-Trans V Cameras (Part 1)",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Monochrome+G",
       "filmSimEnum": 9,
@@ -1948,6 +2569,9 @@
         "whiteBalance": 4
       },
       "sourceUrl": "https://fujixweekly.com/2024/10/04/kodak-t-max-100-hard-tone-a-film-simulation-recipe-for-fujifilm-x-trans-iv-x-trans-v-cameras-part-1/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/10/54041458072_ceb31ee3d6_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2024/10/54041458072_ceb31ee3d6_h.jpg?resize=1000%2C667&ssl=1",
@@ -1975,11 +2599,43 @@
       "compatibleCameras": [
         "X-T5",
         "X100VI"
+      ],
+      "tags": [
+        "B&W Recipes",
+        "Black and white",
+        "Black and white photography",
+        "Camera blog",
+        "Dan Allen",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fujifilm",
+        "Fujifilm black and white",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm film simulation recipe",
+        "Fujifilm recipes",
+        "Fujifilm X-T5",
+        "Fujifilm X100VI",
+        "Kodak T-Max 100",
+        "Kodak TMax",
+        "Monochrome film simulation recipe",
+        "Photography blog",
+        "Recipes",
+        "X100VI blog"
       ]
     },
     {
       "id": "classic-b-w-film-simulation-recipe",
       "name": "Classic B&W Film Simulation Recipe",
+      "source": "Fuji X Weekly",
       "sensorGeneration": "X-Trans V",
       "filmSimulation": "Acros+G",
       "filmSimEnum": 15,
@@ -2027,6 +2683,9 @@
         "wbShiftBlue": 9.0
       },
       "sourceUrl": "https://fujixweekly.com/2025/08/03/classic-bw-film-simulation-recipe/",
+      "sourceType": null,
+      "creator": null,
+      "provenance": null,
       "previewImageUrl": "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/08/54631138494_7931732139_h.jpg?resize=1000%2C667&ssl=1",
       "imageUrls": [
         "https://i0.wp.com/fujixweekly.com/wp-content/uploads/2025/08/54631138494_7931732139_h.jpg?resize=1000%2C667&ssl=1",
@@ -2051,6 +2710,113 @@
       "compatibleCameras": [
         "X100VI",
         "X-E5"
+      ],
+      "tags": [
+        "Acros Film Simulation",
+        "Acros Recipe",
+        "Acros Recipes",
+        "Acros+G",
+        "B&W Recipes",
+        "Black and white",
+        "Camera blog",
+        "Film Simulation",
+        "Film Simulation recipe",
+        "Film Simulation Recipes",
+        "Fuji blog",
+        "Fuji Recipes",
+        "Fuji X Weekly",
+        "Fuji X Weekly blog",
+        "Fuji X Weekly film simulation",
+        "Fuji X Weekly Recipe",
+        "Fujifilm",
+        "Fujifilm Acros Film Simulation",
+        "Fujifilm blog",
+        "Fujifilm Blogger",
+        "Fujifilm camera blog",
+        "Fujifilm Film Simulation",
+        "Fujifilm X-E5",
+        "Fujifilm X100VI",
+        "Photography blog"
+      ]
+    },
+    {
+      "id": "mike-chudley-perfect-x100vi-reala-ace",
+      "name": "Chudley Reala Ace",
+      "source": "Mike Chudley",
+      "sensorGeneration": "X-Trans V",
+      "filmSimulation": "Reala Ace",
+      "filmSimEnum": 20,
+      "settings": {
+        "filmSimulation": "Reala Ace",
+        "dynamicRange": "DR200",
+        "grainEffect": "Weak, Small",
+        "colorChromeEffect": "Weak",
+        "colorChromeFxBlue": "Weak",
+        "whiteBalance": "5800K, +2 Red & -3 Blue",
+        "highlight": "+1",
+        "shadow": "+1",
+        "color": "+2",
+        "sharpness": "0",
+        "clarity": "0"
+      },
+      "ptpSettings": {
+        "filmSimulation": 20,
+        "dynamicRange": 200,
+        "grainEffect": 1,
+        "colorChromeEffect": 1,
+        "colorChromeFxBlue": 1,
+        "color": 20.0,
+        "highlight": 1.0,
+        "shadow": 1.0,
+        "sharpness": 0.0,
+        "colorTemp": 5800,
+        "wbShiftRed": 2.0,
+        "wbShiftBlue": -3.0,
+        "whiteBalance": 32775
+      },
+      "presetSettings": {
+        "filmSimulation": 20,
+        "dynamicRange": 200,
+        "grainEffect": 1,
+        "colorChromeEffect": 1,
+        "colorChromeFxBlue": 1,
+        "color": 20.0,
+        "highlightTone": 10.0,
+        "shadowTone": 10.0,
+        "sharpness": 0.0,
+        "clarity": 0.0,
+        "colorTemp": 5800,
+        "wbShiftRed": 2.0,
+        "wbShiftBlue": -3.0,
+        "whiteBalance": 32775
+      },
+      "sourceUrl": "https://www.mikechudley.com/blogs/x100vijpegs",
+      "sourceType": "creator-owned public recipe page",
+      "creator": "Michael Chudley",
+      "provenance": {
+        "retrievedAt": "2026-09-12",
+        "importMethod": "Manual transcription of factual camera settings only; no source prose or images retained.",
+        "licenseStatus": "No explicit reuse license was found. Retained for private/local recipe research only; do not redistribute source prose or images.",
+        "mappingCompleteness": {
+          "providedSettingCount": 11,
+          "presetSlotMappedCount": 11,
+          "activeShootingMappedCount": 9,
+          "activeShootingRequiresProbe": [
+            "colorChromeFxBlue",
+            "clarity"
+          ]
+        }
+      },
+      "previewImageUrl": null,
+      "imageUrls": [],
+      "date": "2024-03-25",
+      "compatibleCameras": [
+        "X100VI"
+      ],
+      "tags": [
+        "X100VI",
+        "Reala Ace",
+        "creator-published"
       ]
     }
   ]

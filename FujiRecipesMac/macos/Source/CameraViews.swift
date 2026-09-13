@@ -20,6 +20,10 @@ public struct CameraConnectionView: View {
     @State private var confirmOverwriteDrafts = false
     private let cameraSessionFactory: CameraSessionFactory
 
+    private var isConnectionInFlight: Bool {
+        isConnecting || manager.status == .connecting
+    }
+
     public init(
         manager: CameraManager,
         loadouts: LoadoutStore,
@@ -141,7 +145,7 @@ public struct CameraConnectionView: View {
                         .font(.system(size: 9, weight: .black, design: .monospaced))
                         .foregroundStyle(Theme.emeraldGreen)
                 }
-            } else if isConnecting {
+            } else if isConnectionInFlight {
                 VStack(spacing: 5) {
                     ProgressView()
                         .controlSize(.regular)
@@ -199,10 +203,10 @@ public struct CameraConnectionView: View {
 
     private var connectionStateText: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(manager.status == .connected ? "Session Active" : (manager.status == .error ? "Retry Available" : "Ready to Connect"))
+            Text(manager.status == .connected ? "Session Active" : (isConnectionInFlight ? "Connecting…" : (manager.status == .error ? "Retry Available" : "Ready to Connect")))
                 .font(.subheadline.weight(.semibold))
                 .glassPrimary()
-            Text(manager.status == .connected ? "Camera reads and local drafts are tracked separately." : "Connect over USB-C to inspect camera state.")
+            Text(manager.status == .connected ? "Verified USB session. Camera reads and local drafts remain separate." : (isConnectionInFlight ? "Opening a USB PTP session. This can take up to 15 seconds." : "Connect over USB-C to inspect camera state."))
                 .font(.caption2)
                 .glassSecondary()
                 .lineLimit(2)
@@ -212,7 +216,7 @@ public struct CameraConnectionView: View {
     private var connectActionButton: some View {
         Button(action: toggleConnection) {
             HStack(spacing: 6) {
-                if isConnecting {
+                if isConnectionInFlight {
                     ProgressView()
                         .controlSize(.small)
                         .tint(Color.black)
@@ -226,7 +230,7 @@ public struct CameraConnectionView: View {
             }
         }
         .buttonStyle(GlassProminentButtonStyle(color: manager.status == .connected ? Theme.fujiRed : Theme.emeraldGreen, height: 36))
-        .disabled(isConnecting)
+        .disabled(isConnectionInFlight)
         .accessibilityLabel(manager.status == .connected ? "Disconnect camera" : "Connect camera")
         .accessibilityHint(manager.status == .connected
             ? "Ends the current USB camera session."
@@ -463,6 +467,7 @@ public struct RAFDarkroomView: View {
     @State private var selectedRAFPath: URL?
     @State private var conversionStatus = "Ready"
     @State private var conversionError: String? = nil
+    @State private var conversionResult: RAFConversionOutcome?
     @State private var showFileChooser = false
 
     public init(manager: CameraManager) {
@@ -502,6 +507,8 @@ public struct RAFDarkroomView: View {
                     if url.pathExtension.lowercased() == "raf" {
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
                             selectedRAFPath = url
+                            conversionResult = nil
+                            conversionStatus = "RAF selected. Ready to send to the connected camera."
                         }
                     } else {
                         conversionError = "Please select a Fuji RAF raw file (.raf)."
@@ -597,7 +604,7 @@ public struct RAFDarkroomView: View {
                             Text("Choose .RAF RAW File")
                                 .font(.subheadline.weight(.semibold))
                                 .glassPrimary()
-                            Text("Supports Fujifilm X100VI 40.2MP RAF raw files")
+                            Text("Choose a RAF created by this X100VI")
                                 .font(.caption2)
                                 .glassSecondary()
                                 .lineLimit(1)
@@ -662,6 +669,11 @@ public struct RAFDarkroomView: View {
             .glassCard()
             .animation(.spring(response: 0.3, dampingFraction: 0.78), value: converting)
 
+            if let conversionResult, !converting {
+                conversionResultCard(conversionResult)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+
             // Telemetry & Output Notice
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "sparkles")
@@ -686,6 +698,7 @@ public struct RAFDarkroomView: View {
 
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             converting = true
+            conversionResult = nil
             conversionStatus = "Reading the selected RAF and sending it to the camera…"
         }
 
@@ -698,7 +711,9 @@ public struct RAFDarkroomView: View {
                 let rafData = try Data(contentsOf: rafPath)
                 let raf = RAFFile(name: rafPath.lastPathComponent, data: rafData)
                 conversionStatus = "Waiting for camera conversion trigger…"
-                switch await manager.convertRAF(raf) {
+                let outcome = await manager.convertRAF(raf)
+                conversionResult = outcome
+                switch outcome {
                 case .downloadedJPEG:
                     conversionStatus = "JPEG data was returned by the camera."
                 case .triggerAcceptedOutputNotRetrievable:
@@ -715,10 +730,58 @@ public struct RAFDarkroomView: View {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                     conversionStatus = "Conversion could not be completed. Keep the RAF selected and retry after reconnecting the camera."
                     conversionError = "\(error.localizedDescription)\n\nKeep the selected RAF and retry after reconnecting the camera or power-cycling it."
+                    conversionResult = .failed(message: error.localizedDescription)
                     converting = false
                 }
             }
         }
+    }
+
+    private func conversionResultCard(_ outcome: RAFConversionOutcome) -> some View {
+        let isFailure: Bool
+        let title: String
+        let detail: String
+
+        switch outcome {
+        case .downloadedJPEG:
+            isFailure = false
+            title = "JPEG data returned"
+            detail = "The camera returned JPEG data through this connection."
+        case .triggerAcceptedOutputNotRetrievable:
+            isFailure = false
+            title = "Conversion trigger accepted"
+            detail = "The camera accepted the request, but this macOS transport cannot verify JPEG delivery. Check the camera manually."
+        case .cancelled:
+            isFailure = false
+            title = "Conversion cancelled"
+            detail = "The RAF remains selected so you can retry."
+        case .failed(let message):
+            isFailure = true
+            title = "Conversion not completed"
+            detail = message
+        }
+
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isFailure ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(isFailure ? Theme.fujiRed : Theme.emeraldGreen)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .glassPrimary()
+                Text(detail)
+                    .font(.caption2)
+                    .glassSecondary()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .glassCard(
+            padding: 0,
+            radius: 10,
+            tint: (isFailure ? Theme.fujiRed : Theme.emeraldGreen).opacity(0.06),
+            borderColor: (isFailure ? Theme.fujiRed : Theme.emeraldGreen).opacity(0.3)
+        )
+        .accessibilityElement(children: .combine)
     }
 }
 

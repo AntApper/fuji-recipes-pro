@@ -282,10 +282,15 @@ def normalize_white_balance(raw: str) -> dict[str, Any]:
 
     # Determine WB mode
     wb_mode = "unknown"
-    for label, mode in WB_MODE_MAP.items():
-        if label in slug:
-            wb_mode = mode
-            break
+    if kelvin is not None:
+        # The PTP mapping documents Color Temperature as WB mode 0x8007.
+        # It must be selected before writing the custom Kelvin value.
+        wb_mode = "color_temperature"
+    else:
+        for label, mode in WB_MODE_MAP.items():
+            if label in slug:
+                wb_mode = mode
+                break
 
     return {
         "raw": raw,
@@ -324,7 +329,11 @@ def normalize_numeric(raw: str, setting_key: str, ptp_property: str) -> dict[str
 
 
 def normalize_clarity(raw: str) -> dict[str, Any]:
-    return normalize_numeric(raw, "clarity", "TBD")  # Property unknown
+    result = normalize_numeric(raw, "clarity", "TBD")
+    # Preset-slot clarity is known (0xD1A2), but its active-shooting property
+    # remains unverified, so it must never be represented as fully mapped.
+    result["needsProbe"] = True
+    return result
 
 
 def normalize_iso(raw: str) -> dict[str, Any]:
@@ -612,6 +621,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Normalize Fuji recipe settings for PTP mapping.")
     parser.add_argument("--input", default=str(INPUT_PATH), help="Input recipe JSON path.")
     parser.add_argument("--output", default=str(OUTPUT_PATH), help="Output normalized JSON path.")
+    parser.add_argument(
+        "--supplemental",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Additional recipe payload to combine after the base input (repeatable).",
+    )
     args = parser.parse_args()
 
     input_path = Path(args.input)
@@ -625,15 +641,34 @@ def main() -> int:
         payload = json.load(f)
 
     recipes = payload.get("recipes", [])
+    supplemental_counts: list[dict[str, Any]] = []
+    for supplemental_arg in args.supplemental:
+        supplemental_path = Path(supplemental_arg)
+        if not supplemental_path.exists():
+            print(f"Error: Supplemental file not found: {supplemental_path}", file=sys.stderr)
+            return 1
+        with supplemental_path.open(encoding="utf-8") as f:
+            supplemental_payload = json.load(f)
+        supplemental_recipes = supplemental_payload.get("recipes", [])
+        if not isinstance(supplemental_recipes, list):
+            print(f"Error: Supplemental recipes must be an array: {supplemental_path}", file=sys.stderr)
+            return 1
+        recipes.extend(supplemental_recipes)
+        supplemental_counts.append({
+            "path": str(supplemental_path),
+            "recipeCount": len(supplemental_recipes),
+        })
     normalized_recipes = [normalize_recipe(r) for r in recipes]
 
     # Build output payload
     output_payload = {
         **payload,
         "recipes": normalized_recipes,
+        "recipeCount": len(normalized_recipes),
         "normalizationMeta": {
             "tool": "normalize_settings.py",
             "sourceFile": str(input_path),
+            "supplementalSources": supplemental_counts,
             "totalRecipes": len(normalized_recipes),
         },
     }

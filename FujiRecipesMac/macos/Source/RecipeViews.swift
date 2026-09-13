@@ -265,6 +265,8 @@ public struct RecipeListView: View {
                     .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
                 }
 
+                metadataFilterMenus
+
                 Spacer(minLength: 4)
 
                 // Sort Order Menu
@@ -309,6 +311,72 @@ public struct RecipeListView: View {
         }
     }
 
+    private var metadataFilterMenus: some View {
+        Group {
+            Menu {
+                Button("Any White Balance") { store.selectedWhiteBalance = nil }
+                Divider()
+                ForEach(store.availableWhiteBalances, id: \.rawValue) { whiteBalance in
+                    Button {
+                        store.selectedWhiteBalance = whiteBalance
+                    } label: {
+                        if store.selectedWhiteBalance == whiteBalance {
+                            Label(whiteBalance.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(whiteBalance.displayName)
+                        }
+                    }
+                }
+            } label: {
+                filterMenuLabel(
+                    title: store.selectedWhiteBalance?.displayName ?? "White Balance",
+                    icon: "thermometer.medium"
+                )
+            }
+            .menuStyle(.borderlessButton)
+
+            if !store.availableKeywords.isEmpty {
+                Menu {
+                    Button("Any Source Keyword") { store.selectedKeyword = nil }
+                    Divider()
+                    ForEach(store.availableKeywords) { keyword in
+                        Button {
+                            store.selectedKeyword = keyword.name
+                        } label: {
+                            HStack {
+                                Text(keyword.name)
+                                Text("\(keyword.count)")
+                            }
+                        }
+                    }
+                } label: {
+                    filterMenuLabel(
+                        title: store.selectedKeyword ?? "Keywords",
+                        icon: "tag"
+                    )
+                }
+                .menuStyle(.borderlessButton)
+            }
+        }
+    }
+
+    private func filterMenuLabel(title: String, icon: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+            Text(title)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 8, weight: .bold))
+        }
+        .foregroundStyle(Theme.textSecondary)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Color.white.opacity(0.04)))
+        .overlay(Capsule().stroke(Theme.specularBorder, lineWidth: 0.8))
+    }
+
     private var emptyState: some View {
         VStack(spacing: 14) {
             ZStack {
@@ -330,12 +398,18 @@ public struct RecipeListView: View {
                     .glassSecondary()
             }
 
-            if !store.searchQuery.isEmpty || store.selectedFilmSimFamily != .all || store.selectedDRFilter != .all {
+            if !store.searchQuery.isEmpty
+                || store.selectedFilmSimFamily != .all
+                || store.selectedDRFilter != .all
+                || store.selectedWhiteBalance != nil
+                || store.selectedKeyword != nil {
                 Button("Reset Filters") {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
                         store.searchQuery = ""
                         store.selectedFilmSimFamily = .all
                         store.selectedDRFilter = .all
+                        store.selectedWhiteBalance = nil
+                        store.selectedKeyword = nil
                         store.selectedFilterCategory = nil
                     }
                 }
@@ -755,6 +829,8 @@ private struct RecipeCard: View {
             }
 
             // Recipe Camera Menu Formula Grid
+            provenanceSection
+
             formulaGridSection
 
             // Actions & Links
@@ -858,6 +934,36 @@ private struct RecipeCard: View {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .stroke(Color.white.opacity(0.06), lineWidth: 0.6)
                     )
+                }
+            }
+            .padding(.horizontal, 12)
+        }
+    }
+
+    @ViewBuilder
+    private var provenanceSection: some View {
+        if recipe.dateString != nil || !recipe.source.isEmpty || !(recipe.tags ?? []).isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("RECIPE NOTES")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Theme.textTertiary)
+
+                HStack(spacing: 6) {
+                    if !recipe.source.isEmpty {
+                        Label(recipe.source, systemImage: "book.closed")
+                    }
+                    if let date = recipe.dateString {
+                        Label(date, systemImage: "calendar")
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(Theme.textSecondary)
+
+                if let tags = recipe.tags, !tags.isEmpty {
+                    Text(tags.prefix(4).joined(separator: "  ·  "))
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(2)
                 }
             }
             .padding(.horizontal, 12)

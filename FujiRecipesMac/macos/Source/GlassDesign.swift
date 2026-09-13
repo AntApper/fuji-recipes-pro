@@ -92,6 +92,7 @@ public enum Glass {
 // MARK: - Window Backdrop with Dynamic Ambient Lighting
 
 public struct GlassWindowBackground: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var ambientPhase: Bool = false
     
     public init() {}
@@ -144,8 +145,17 @@ public struct GlassWindowBackground: View {
                 }
             }
             .ignoresSafeArea()
-            .animation(.easeInOut(duration: 16).repeatForever(autoreverses: true), value: ambientPhase)
-            .onAppear { ambientPhase = true }
+            .animation(
+                reduceMotion ? .default : .easeInOut(duration: 16).repeatForever(autoreverses: true),
+                value: ambientPhase
+            )
+            .onAppear {
+                guard !reduceMotion else { return }
+                ambientPhase = true
+            }
+            .onChange(of: reduceMotion) { _, enabled in
+                ambientPhase = !enabled
+            }
 
             // Vignette for cinematic focus
             LinearGradient(
@@ -309,6 +319,7 @@ public extension View {
 }
 
 public struct AmbientDriftModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let amount: CGFloat
     let duration: Double
     @State private var phase: Bool = false
@@ -321,10 +332,16 @@ public struct AmbientDriftModifier: ViewModifier {
             )
             .scaleEffect(phase ? 1.01 : 0.99)
             .animation(
-                .easeInOut(duration: duration).repeatForever(autoreverses: true),
+                reduceMotion ? .default : .easeInOut(duration: duration).repeatForever(autoreverses: true),
                 value: phase
             )
-            .onAppear { phase = true }
+            .onAppear {
+                guard !reduceMotion else { return }
+                phase = true
+            }
+            .onChange(of: reduceMotion) { _, enabled in
+                phase = !enabled
+            }
     }
 }
 

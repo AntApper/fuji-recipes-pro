@@ -23,6 +23,8 @@ public final class RecipeStore: ObservableObject {
     @Published public var selectedFilterCategory: FilterCategory? = nil
     @Published public var selectedFilmSimFamily: FilmSimFamily = .all
     @Published public var selectedDRFilter: DRFilter = .all
+    @Published public var selectedWhiteBalance: WhiteBalanceMode?
+    @Published public var selectedKeyword: String?
     @Published public var sortOrder: SortOrder = .recommended
     @Published public var searchQuery: String = ""
     @Published public var lastError: String?
@@ -95,6 +97,7 @@ public final class RecipeStore: ObservableObject {
     }
 
     private let recipeLoading: RecipeLoading
+    private var catalog = RecipeCatalog(recipes: [])
 
     /// The loader is injectable so previews and macOS UI tests can exercise
     /// loaded, empty, and failure states without relying on the app bundle.
@@ -105,69 +108,21 @@ public final class RecipeStore: ObservableObject {
     }
 
     public var filteredRecipes: [Recipe] {
-        var list = recipes
+        var filters = RecipeCatalog.Filters()
+        filters.favoriteIDs = favorites.favoriteIDs
+        filters.favoritesOnly = selectedFilterCategory == .favorites
+        filters.dynamicRange = selectedDRFilter.dynamicRange
+        filters.whiteBalance = selectedWhiteBalance
+        filters.keyword = selectedKeyword
+        filters.searchText = searchQuery
+        filters.sortOrder = sortOrder.catalogSortOrder
 
-        // 1. Favorites filter
-        if selectedFilterCategory == .favorites {
-            list = list.filter { favorites.isFavorite($0.id) }
-        }
-
-        // 2. Film Sim family filter
-        if selectedFilmSimFamily != .all {
-            list = list.filter { recipe in
-                let name = (recipe.filmSimulation?.displayName ?? recipe.settings?["filmSimulation"] ?? "").lowercased()
-                switch selectedFilmSimFamily {
-                case .all: return true
-                case .classicChrome: return name.contains("classic chrome")
-                case .realaAce: return name.contains("reala")
-                case .classicNeg: return name.contains("classic neg") || name.contains("classic negative")
-                case .velvia: return name.contains("velvia")
-                case .acros: return name.contains("acros") || name.contains("mono") || name.contains("black")
-                case .nostalgicNeg: return name.contains("nostalgic")
-                case .proviaAstia: return name.contains("provia") || name.contains("astia") || name.contains("pro neg")
-                case .eterna: return name.contains("eterna")
-                }
-            }
-        }
-
-        // 3. Dynamic Range filter
-        if selectedDRFilter != .all {
-            list = list.filter { recipe in
-                let dr = recipe.dynamicRange?.rawValue ?? 0
-                switch selectedDRFilter {
-                case .all: return true
-                case .dr400: return dr == 400 || (recipe.settings?["dynamicRange"] ?? "").contains("400")
-                case .dr200: return dr == 200 || (recipe.settings?["dynamicRange"] ?? "").contains("200")
-                case .dr100: return dr == 100 || (recipe.settings?["dynamicRange"] ?? "").contains("100")
-                }
-            }
-        }
-
-        // 4. Text search
-        let query = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        if !query.isEmpty {
-            list = list.filter { recipe in
-                recipe.name.lowercased().contains(query)
-                    || (recipe.filmSimulation?.displayName.lowercased() ?? "").contains(query)
-                    || (recipe.settings?.values.contains { $0.lowercased().contains(query) } ?? false)
-                    || (recipe.tags?.contains { $0.lowercased().contains(query) } ?? false)
-            }
-        }
-
-        // 5. Sorting
-        switch sortOrder {
-        case .recommended:
-            return list
-        case .alphabetical:
-            return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        case .filmSim:
-            return list.sorted {
-                ($0.filmSimulation?.displayName ?? "").localizedCaseInsensitiveCompare($1.filmSimulation?.displayName ?? "") == .orderedAscending
-            }
-        case .newest:
-            return list.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
-        }
+        return catalog.recipes(matching: filters)
+            .filter { selectedFilmSimFamily.matches($0.filmSimulation) }
     }
+
+    public var availableWhiteBalances: [WhiteBalanceMode] { catalog.whiteBalances }
+    public var availableKeywords: [RecipeCatalog.Keyword] { catalog.keywords }
 
     public func loadRecipes() async {
         loadingState = .loading
@@ -181,6 +136,7 @@ public final class RecipeStore: ObservableObject {
     public func loadRecipesSynchronously() {
         do {
             recipes = try recipeLoading()
+            catalog = RecipeCatalog(recipes: recipes)
             lastError = nil
             loadingState = .loaded
             DebugLogger.info("Loaded \(recipes.count) recipes", category: .recipes)
@@ -188,6 +144,46 @@ public final class RecipeStore: ObservableObject {
             lastError = error.localizedDescription
             loadingState = .failed
             DebugLogger.error("Failed to load recipes: \(error.localizedDescription)", category: .recipes)
+        }
+    }
+}
+
+private extension RecipeStore.FilmSimFamily {
+    func matches(_ simulation: FilmSimulation?) -> Bool {
+        guard self != .all else { return true }
+        let name = simulation?.displayName ?? ""
+        switch self {
+        case .all: return true
+        case .classicChrome: return name == "Classic Chrome"
+        case .realaAce: return name == "Reala Ace"
+        case .classicNeg: return name == "Classic Negative"
+        case .velvia: return name.contains("Velvia")
+        case .acros: return name.contains("ACROS") || name.contains("Monochrome")
+        case .nostalgicNeg: return name == "Nostalgic Negative"
+        case .proviaAstia: return name.contains("PROVIA") || name.contains("ASTIA") || name.contains("PRO Neg")
+        case .eterna: return name.contains("ETERNA")
+        }
+    }
+}
+
+private extension RecipeStore.DRFilter {
+    var dynamicRange: DynamicRange? {
+        switch self {
+        case .all: nil
+        case .dr100: .dr100
+        case .dr200: .dr200
+        case .dr400: .dr400
+        }
+    }
+}
+
+private extension RecipeStore.SortOrder {
+    var catalogSortOrder: RecipeCatalog.SortOrder {
+        switch self {
+        case .recommended: .featured
+        case .alphabetical: .name
+        case .filmSim: .filmSimulation
+        case .newest: .newest
         }
     }
 }
