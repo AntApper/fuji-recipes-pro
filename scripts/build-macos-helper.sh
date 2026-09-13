@@ -24,7 +24,8 @@ Builds a helper slice and a matching libusb slice for every requested
 architecture, combines them into universal Mach-O files when more than one
 architecture is requested, then writes resource hashes to the provenance
 manifest. Set LIBUSB_DYLIB to a universal (or requested-architecture) libusb
-dylib to avoid Homebrew discovery.
+dylib to avoid Homebrew discovery. When using a prebuilt runtime, set
+LIBUSB_INCLUDE_DIR and LIBUSB_LICENSE to the matching header and COPYING paths.
 
 Examples:
   scripts/build-macos-helper.sh
@@ -65,6 +66,15 @@ else
   libusb_source="$(brew --prefix libusb)/lib/libusb-1.0.0.dylib"
 fi
 [[ -f "$libusb_source" ]] || { echo "error: missing libusb dylib: $libusb_source" >&2; exit 1; }
+if [[ -n "${LIBUSB_INCLUDE_DIR:-}" ]]; then
+  libusb_include_dir="$LIBUSB_INCLUDE_DIR"
+else
+  libusb_include_dir="$(dirname "$(dirname "$libusb_source")")/include"
+fi
+[[ -f "$libusb_include_dir/libusb-1.0/libusb.h" ]] || {
+  echo "error: missing libusb headers: $libusb_include_dir/libusb-1.0/libusb.h" >&2
+  exit 1
+}
 
 sdk="$(xcrun --sdk macosx --show-sdk-path)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/fuji-helper.XXXXXX")"
@@ -94,7 +104,7 @@ for arch in $architectures; do
   # lipo would leave one helper slice pointing to a build-directory path.
   install_name_tool -id "@rpath/libusb-1.0.0.dylib" "$runtime_slice"
   clang -O2 -arch "$arch" -isysroot "$sdk" -mmacosx-version-min=14.0 \
-    "$source_file" -I"$(dirname "$(dirname "$libusb_source")")/include" \
+    "$source_file" -I"$libusb_include_dir" \
     "$runtime_slice" \
     -Wl,-rpath,@loader_path -o "$helper_slice"
   helper_slices+=("$helper_slice")
@@ -120,10 +130,9 @@ chmod 755 "$staged_helper"
 codesign --force --sign - "$staged_runtime"
 codesign --force --sign - "$staged_helper"
 
-libusb_prefix="$(dirname "$(dirname "$libusb_source")")"
-license="$libusb_prefix/COPYING"
+license="${LIBUSB_LICENSE:-$(dirname "$(dirname "$libusb_source")")/COPYING}"
 [[ -f "$license" ]] || {
-  echo "error: missing libusb COPYING file beside the supplied runtime: $license" >&2
+  echo "error: missing libusb COPYING file: $license" >&2
   exit 1
 }
 cp "$license" "$stage/ThirdPartyNotices/libusb-COPYING.txt"

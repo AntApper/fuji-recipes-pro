@@ -38,4 +38,64 @@ final class X100VIHelperRequestTests: XCTestCase {
         XCTAssertEqual(request["color_chrome_fx_blue"] as? Int, 2, "D197")
         XCTAssertEqual(request["high_iso_nr"] as? Int, 32_768, "D1A1")
     }
+
+    func testBusySlotSelectionIsEligibleForOneSafeReconnectRetry() {
+        let response: [String: Any] = [
+            "success": false,
+            "result": [
+                "failure_stage": "slot_selection",
+                "slot_select_rc": 0x2019,
+                "error": "slot_select_failed"
+            ]
+        ]
+
+        XCTAssertEqual(transientSlotSelectionCode(in: response), 0x2019)
+    }
+
+    func testBaselineReadFailureIsNotRetriedAsSlotSelection() {
+        let response: [String: Any] = [
+            "success": false,
+            "result": [
+                "failure_stage": "baseline_read",
+                "slot_select_rc": 0,
+                "baseline_read_rc": -11,
+                "error": "baseline_read_failed"
+            ]
+        ]
+
+        XCTAssertNil(transientSlotSelectionCode(in: response))
+    }
+
+    func testSlotSelectionFailureIncludesStageAndNumericCode() {
+        let response: [String: Any] = [
+            "success": false,
+            "result": [
+                "failure_stage": "slot_selection",
+                "slot_select_rc": 0x2019,
+                "error": "slot_select_failed"
+            ]
+        ]
+
+        XCTAssertEqual(
+            presetSlotFailureDetails(response),
+            "slot_selection failed (PTP 0x2019 (8217)): slot_select_failed"
+        )
+    }
+
+    func testPropertyReadFailureRejectsIncompleteSlotData() {
+        let response: [String: Any] = [
+            "success": true,
+            "result": [
+                "properties": [
+                    "0xD18D_Preset Name": ["rc": -2],
+                    "0xD192_Film Simulation": ["rc": 0]
+                ]
+            ]
+        ]
+
+        XCTAssertEqual(
+            presetPropertyReadFailure(in: response),
+            "0xD18D_Preset Name read failed (transport -2)"
+        )
+    }
 }

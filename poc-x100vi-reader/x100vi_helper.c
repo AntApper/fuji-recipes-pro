@@ -195,6 +195,7 @@ static void put_u16_le(uint8_t *buf, uint16_t val) {
 
 /* Global transaction ID - starts at 0, increments per FilmKit/rawji */
 static uint32_t g_transactionId = 0;
+static bool g_sessionOpen = false;
 
 static int ptp_send(libusb_device_handle *dev, uint16_t code, int paramCount, const uint32_t *params) {
     /* PTP Container: length(4) + type(2) + code(2) + trans_id(4) + params(N*4) */
@@ -527,18 +528,9 @@ static void ptp_container_free(PtpContainer *container) {
     memset(container, 0, sizeof(*container));
 }
 
-static int ptp_libusb_read(void *context, uint8_t *buffer, size_t length,
-                           size_t *transferred) {
-    int actual = 0;
-    int rc = libusb_bulk_transfer((libusb_device_handle *)context, 0x81, buffer,
-                                  (int)length, &actual, 10000);
-    *transferred = actual > 0 ? (size_t)actual : 0;
-    return rc;
-}
-
-/* Read exactly one PTP container: header first, then exactly its payload.
- * Limiting every transfer to the remaining framed bytes prevents a DATA read
- * from consuming the following RESPONSE container. */
+/* Fixture reader used by framing tests. The live libusb reader below keeps an
+ * inbound buffer because USB bulk transfers do not preserve PTP container
+ * boundaries. */
 static int ptp_read_container_with(PtpReadFunction readFunction, void *context,
                                    PtpContainer *container) {
     uint8_t header[PTP_HEADER_LENGTH];
@@ -586,8 +578,69 @@ static int ptp_read_container_with(PtpReadFunction readFunction, void *context,
     return LIBUSB_SUCCESS;
 }
 
+/* A property DATA container can be 14 bytes while the PTP header is 12 bytes.
+ * Asking libusb for exactly 12 causes macOS to report LIBUSB_ERROR_OVERFLOW and
+ * discard the two-byte payload. Retain every byte supplied by a generous bulk
+ * read so a following RESPONSE container is not lost when both arrive together. */
+#define PTP_RX_BUFFER_CAPACITY (64 * 1024)
+static uint8_t g_ptpRxBuffer[PTP_RX_BUFFER_CAPACITY];
+static size_t g_ptpRxLength = 0;
+
+static void ptp_reset_receive_buffer(void) {
+    g_ptpRxLength = 0;
+}
+
+static int ptp_read_exact(libusb_device_handle *dev, uint8_t *output, size_t length) {
+    size_t offset = 0;
+    while (offset < length) {
+        if (g_ptpRxLength == 0) {
+            int actual = 0;
+            int rc = libusb_bulk_transfer(dev, 0x81, g_ptpRxBuffer,
+                                          (int)sizeof(g_ptpRxBuffer), &actual, 10000);
+            if (rc != LIBUSB_SUCCESS) return rc;
+            if (actual <= 0) return PTP_FRAME_SHORT_READ;
+            g_ptpRxLength = (size_t)actual;
+        }
+
+        size_t available = length - offset;
+        size_t count = g_ptpRxLength < available ? g_ptpRxLength : available;
+        memcpy(output + offset, g_ptpRxBuffer, count);
+        offset += count;
+        g_ptpRxLength -= count;
+        if (g_ptpRxLength > 0) {
+            memmove(g_ptpRxBuffer, g_ptpRxBuffer + count, g_ptpRxLength);
+        }
+    }
+    return LIBUSB_SUCCESS;
+}
+
 static int ptp_read_container(libusb_device_handle *dev, PtpContainer *container) {
-    return ptp_read_container_with(ptp_libusb_read, dev, container);
+    uint8_t header[PTP_HEADER_LENGTH];
+    memset(container, 0, sizeof(*container));
+
+    int rc = ptp_read_exact(dev, header, sizeof(header));
+    if (rc != LIBUSB_SUCCESS) return rc;
+
+    container->length = get_u32_le(header);
+    container->type = get_u16_le(header + 4);
+    container->code = get_u16_le(header + 6);
+    container->transactionId = get_u32_le(header + 8);
+    if (container->length < PTP_HEADER_LENGTH ||
+        container->length > PTP_MAX_CONTAINER_LENGTH) {
+        return PTP_FRAME_INVALID_LENGTH;
+    }
+
+    container->payloadLength = container->length - PTP_HEADER_LENGTH;
+    if (container->payloadLength == 0) return LIBUSB_SUCCESS;
+    container->payload = malloc(container->payloadLength);
+    if (!container->payload) return PTP_FRAME_ALLOCATION_FAILED;
+
+    rc = ptp_read_exact(dev, container->payload, container->payloadLength);
+    if (rc != LIBUSB_SUCCESS) {
+        ptp_container_free(container);
+        return rc;
+    }
+    return LIBUSB_SUCCESS;
 }
 
 static int ptp_validate_container(const PtpContainer *container,
@@ -1112,10 +1165,11 @@ static int reset_device(libusb_device_handle *dev) {
 
 /* Forward declarations for connect/disconnect helpers */
 static int do_open_device(libusb_context *ctx, libusb_device_handle **dev);
+static int do_open_device_attempt(libusb_context *ctx, libusb_device_handle **dev, bool recoverStaleSession);
 static void do_close_device(libusb_device_handle **dev);
 
 /* Open device, claim interface, send OpenSession — reusable for connect/reconnect */
-static int do_open_device(libusb_context *ctx, libusb_device_handle **dev) {
+static int do_open_device_attempt(libusb_context *ctx, libusb_device_handle **dev, bool recoverStaleSession) {
     libusb_device_handle *h = libusb_open_device_with_vid_pid(ctx, FUJI_VENDOR, X100VI_PRODUCT);
     if (!h) return -1;
 
@@ -1142,40 +1196,98 @@ static int do_open_device(libusb_context *ctx, libusb_device_handle **dev) {
     /* Clear endpoint halts after fresh connection (macOS libusb quirk) */
     clear_endpoint_halt(h, 0x81);
     clear_endpoint_halt(h, 0x01);
+    ptp_reset_receive_buffer();
     usleep(100000);  /* 100ms settle after clear */
 
-    /* OpenSession is required — send it and ignore response */
+    /* OpenSession carries a non-zero SessionID as its first command parameter.
+     * Do not confuse the header transaction ID with that parameter: a zero
+     * SessionID leaves the camera connected but returns 0x2003 SessionNotOpen
+     * for every later property command. Fuji accepts the normal first
+     * transaction ID (1) for OpenSession, matching FilmKit's live protocol. */
     fprintf(stderr, "[HELPER] Sending OpenSession (required by camera)...\n");
     uint8_t sessResp[256]; int sessLen = 0;
-    uint32_t sessParam = ++g_transactionId;
+    const uint32_t sessionId = 1;
+    const uint32_t sessionTransactionId = ++g_transactionId;
     uint32_t cmdLen = 12 + 1 * 4;
     uint8_t cmdBuf[32];
     memset(cmdBuf, 0, sizeof(cmdBuf));
     put_u32_le(cmdBuf, cmdLen);
     put_u16_le(cmdBuf + 4, 0x0001);
     put_u16_le(cmdBuf + 6, 0x1002);
-    put_u32_le(cmdBuf + 8, sessParam);
+    put_u32_le(cmdBuf + 8, sessionTransactionId);
+    put_u32_le(cmdBuf + 12, sessionId);
     int transferred = 0;
     rc = libusb_bulk_transfer(h, 0x01, cmdBuf, (int)cmdLen, &transferred, 5000);
-    if (rc == LIBUSB_SUCCESS) {
-        rc = ptp_recv(h, sessResp, sizeof(sessResp), &sessLen);
-        if (rc == LIBUSB_SUCCESS && sessLen >= 12) {
-            uint16_t sessRespType = sessResp[4] | (sessResp[5] << 8);
-            uint16_t sessRespCode = sessResp[6] | (sessResp[7] << 8);
-            fprintf(stderr, "[HELPER] OpenSession response: type=0x%04X code=0x%04X\n", sessRespType, sessRespCode);
-        }
+    if (rc != LIBUSB_SUCCESS || transferred != (int)cmdLen) {
+        libusb_release_interface(h, 0);
+        libusb_close(h);
+        return -3;
     }
 
+    rc = ptp_recv(h, sessResp, sizeof(sessResp), &sessLen);
+    if (rc != LIBUSB_SUCCESS || sessLen < 12) {
+        libusb_release_interface(h, 0);
+        libusb_close(h);
+        return -3;
+    }
+    uint16_t sessRespType = sessResp[4] | (sessResp[5] << 8);
+    uint16_t sessRespCode = sessResp[6] | (sessResp[7] << 8);
+    fprintf(stderr, "[HELPER] OpenSession response: type=0x%04X code=0x%04X\n", sessRespType, sessRespCode);
+    if (sessRespType != 0x0003) {
+        libusb_release_interface(h, 0);
+        libusb_close(h);
+        return -3;
+    }
+    if (sessRespCode == 0x201E && recoverStaleSession) {
+        /* A previous helper process released USB without closing PTP. Mirror
+         * FilmKit's recovery: close the stale session, reset the transport,
+         * then make one clean OpenSession attempt. */
+        fprintf(stderr, "[HELPER] Stale PTP session detected; closing and reopening...\n");
+        uint8_t closeResp[256]; int closeLen = 0;
+        int closeRc = ptp_send(h, 0x1003, 0, NULL);
+        if (closeRc == LIBUSB_SUCCESS) {
+            closeRc = ptp_recv(h, closeResp, sizeof(closeResp), &closeLen);
+        }
+        libusb_release_interface(h, 0);
+        libusb_close(h);
+        if (closeRc != LIBUSB_SUCCESS) return -3;
+        usleep(500000);
+        return do_open_device_attempt(ctx, dev, false);
+    }
+    if (sessRespCode != 0x2001) {
+        libusb_release_interface(h, 0);
+        libusb_close(h);
+        return (int)sessRespCode;
+    }
+
+    g_sessionOpen = true;
     *dev = h;
     return 0;
+}
+
+static int do_open_device(libusb_context *ctx, libusb_device_handle **dev) {
+    return do_open_device_attempt(ctx, dev, true);
 }
 
 /* Close device and release interface */
 static void do_close_device(libusb_device_handle **dev) {
     if (*dev) {
+        if (g_sessionOpen) {
+            /* Close the PTP session before releasing USB so the next helper
+             * does not inherit a stale SessionAlreadyOpen state. The response
+             * is best-effort, but consuming it prevents the next OpenSession
+             * from inheriting an unread response on macOS's USB endpoint. */
+            uint8_t closeResponse[256];
+            int closeLength = 0;
+            if (ptp_send(*dev, 0x1003, 0, NULL) == LIBUSB_SUCCESS) {
+                (void)ptp_recv(*dev, closeResponse, sizeof(closeResponse), &closeLength);
+            }
+            g_sessionOpen = false;
+        }
         libusb_release_interface(*dev, 0);
         libusb_close(*dev);
         *dev = NULL;
+        ptp_reset_receive_buffer();
     }
 }
 
@@ -1362,12 +1474,12 @@ static int detect_empty_preset_slot(libusb_device_handle *dev, bool *isEmptySlot
     return 0;
 }
 
-static void print_preset_write_result(const char *id, int slot, int slotSelectRc,
+static void print_preset_write_result(const char *id, int slot, int slotSelectRc, int baselineReadRc,
                                       bool nameRequested, int nameRc,
                                       const PresetField *fields, const bool *requested,
                                       const uint16_t *values, const int *writeRc, const int *verifyRc,
                                       int fieldCount, bool wasEmptySlot) {
-    bool success = slotSelectRc == 0 && (!nameRequested || nameRc == 0);
+    bool success = slotSelectRc == 0 && baselineReadRc == 0 && (!nameRequested || nameRc == 0);
     bool verified = success;
     for (int i = 0; i < fieldCount; i++) {
         if (!requested[i]) continue;
@@ -1382,11 +1494,18 @@ static void print_preset_write_result(const char *id, int slot, int slotSelectRc
         verified = false;
     }
 
+    const char *failureStage = "none";
+    if (slotSelectRc != 0) failureStage = "slot_selection";
+    else if (baselineReadRc != 0) failureStage = "baseline_read";
+    else if (nameRequested && nameRc != 0) failureStage = "name_write";
+    else if (!success || !verified) failureStage = "setting_write_or_verify";
+
     fprintf(stdout,
             "{\"id\":\"%s\",\"success\":%s,\"result\":{\"slot\":%d,"
-            "\"slot_select_rc\":%d,\"verified\":%s,\"is_empty_slot\":%s,"
+            "\"slot_select_rc\":%d,\"baseline_read_rc\":%d,\"failure_stage\":\"%s\","
+            "\"verified\":%s,\"is_empty_slot\":%s,"
             "\"created_from_empty\":%s,\"warnings\":[",
-            id, success ? "true" : "false", slot, slotSelectRc,
+            id, success ? "true" : "false", slot, slotSelectRc, baselineReadRc, failureStage,
             verified ? "true" : "false", wasEmptySlot ? "true" : "false",
             (success && verified && wasEmptySlot) ? "true" : "false");
     bool first = true;
@@ -1400,16 +1519,21 @@ static void print_preset_write_result(const char *id, int slot, int slotSelectRc
     fprintf(stdout, "],\"errors\":[");
     first = true;
     if (slotSelectRc != 0) {
-        fprintf(stdout, "{\"property\":\"0xD18C\",\"key\":\"slot\",\"rc\":%d}", slotSelectRc);
+        fprintf(stdout, "{\"stage\":\"slot_selection\",\"property\":\"0xD18C\",\"key\":\"slot\",\"rc\":%d}", slotSelectRc);
+        first = false;
+    }
+    if (baselineReadRc != 0) {
+        if (!first) fputc(',', stdout);
+        fprintf(stdout, "{\"stage\":\"baseline_read\",\"property\":\"C-slot baseline\",\"rc\":%d}", baselineReadRc);
         first = false;
     }
     if (nameRequested && nameRc != 0) {
         if (!first) fputc(',', stdout);
-        fprintf(stdout, "{\"property\":\"0xD18D\",\"key\":\"name\",\"rc\":%d}", nameRc);
+        fprintf(stdout, "{\"stage\":\"name_write\",\"property\":\"0xD18D\",\"key\":\"name\",\"rc\":%d}", nameRc);
         first = false;
     } else if (nameRequested && verifyRc[fieldCount] != 0) {
         if (!first) fputc(',', stdout);
-        fprintf(stdout, "{\"property\":\"0xD18D\",\"key\":\"name\",\"rc\":%d}", verifyRc[fieldCount]);
+        fprintf(stdout, "{\"stage\":\"name_verify\",\"property\":\"0xD18D\",\"key\":\"name\",\"rc\":%d}", verifyRc[fieldCount]);
         first = false;
     }
     for (int i = 0; i < fieldCount; i++) {
@@ -1419,7 +1543,7 @@ static void print_preset_write_result(const char *id, int slot, int slotSelectRc
         if (warning || rc == 0) continue;
         if (!first) fputc(',', stdout);
         fprintf(stdout,
-                "{\"property\":\"0x%04X\",\"key\":\"%s\",\"requested_raw\":\"0x%04X\",\"rc\":%d}",
+                "{\"stage\":\"setting_write_or_verify\",\"property\":\"0x%04X\",\"key\":\"%s\",\"requested_raw\":\"0x%04X\",\"rc\":%d}",
                 fields[i].code, fields[i].key, values[i], rc);
         first = false;
     }
@@ -1504,9 +1628,10 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "[HELPER] Connecting...\n");
             rc = do_open_device(ctx, &dev);
             if (rc != 0) {
-                const char *errMsg = rc == -1 ? "camera_not_found" : "interface_claim_failed";
-                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"%s\"}\n",
-                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", errMsg);
+                const char *errMsg = rc == -1 ? "camera_not_found"
+                    : (rc == -2 ? "interface_claim_failed" : "session_open_failed");
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"%s\",\"code\":%d}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", errMsg, rc);
                 fflush(stdout);
                 continue;
             }
@@ -1539,9 +1664,10 @@ int main(int argc, char *argv[]) {
 
             rc = do_open_device(ctx, &dev);
             if (rc != 0) {
-                const char *errMsg = rc == -1 ? "camera_not_found" : "interface_claim_failed";
-                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"reconnect_%s\"}\n",
-                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", errMsg);
+                const char *errMsg = rc == -1 ? "camera_not_found"
+                    : (rc == -2 ? "interface_claim_failed" : "session_open_failed");
+                fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"error\":\"reconnect_%s\",\"code\":%d}\n",
+                        json_get_string(line, "id") ? json_get_string(line, "id") : "0", errMsg, rc);
                 fflush(stdout);
                 continue;
             }
@@ -1629,7 +1755,8 @@ int main(int argc, char *argv[]) {
                 ? write_prop_u16(dev, 0xD18C, (uint16_t)slot) : -400;
             if (slotSelRc != 0) {
                 fprintf(stdout, "{\"id\":\"%s\",\"success\":false,\"result\":{\"slot\":%d,"
-                        "\"slot_select_rc\":%d,\"error\":\"slot_select_failed\"}}\n",
+                        "\"slot_select_rc\":%d,\"failure_stage\":\"slot_selection\","
+                        "\"error\":\"slot_select_failed\"}}\n",
                         json_get_string(line, "id") ? json_get_string(line, "id") : "0",
                         slot, slotSelRc);
                 fflush(stdout);
@@ -1739,7 +1866,7 @@ int main(int argc, char *argv[]) {
 
             if (!requestValid) {
                 int preflightRc = (slot >= 1 && slot <= 7) ? 0 : -400;
-                print_preset_write_result(id, slot, preflightRc, nameRequested, nameRc,
+                print_preset_write_result(id, slot, preflightRc, 0, nameRequested, nameRc,
                                           preset_fields, requested, values, writeRc, verifyRc, fieldCount, false);
                 fflush(stdout);
                 continue;
@@ -1757,21 +1884,20 @@ int main(int argc, char *argv[]) {
 
             bool wasEmptySlot = false;
             int slotSelRc = write_prop_u16(dev, 0xD18C, (uint16_t)slot);
+            int baselineReadRc = 0;
             if (slotSelRc == 0) {
                 usleep(100000);  /* verified FilmKit timing */
                 /* Detect before the first mutation.  A detection error is a
                  * write error: without a reliable baseline we cannot report
                  * whether this is creation or update. */
-                int emptyDetectionRc = detect_empty_preset_slot(dev, &wasEmptySlot);
-                if (emptyDetectionRc != 0) {
-                    slotSelRc = emptyDetectionRc;
-                } else if (nameRequested && nameRc == 0) {
+                baselineReadRc = detect_empty_preset_slot(dev, &wasEmptySlot);
+                if (baselineReadRc == 0 && nameRequested && nameRc == 0) {
                     nameRc = write_prop_string(dev, 0xD18D, name);
                 }
 
                 /* D18D is a core write.  Do not mutate additional settings if
                  * it was rejected or the supplied UTF-8 was not encodable. */
-                if (emptyDetectionRc == 0 && (!nameRequested || nameRc == 0)) {
+                if (baselineReadRc == 0 && (!nameRequested || nameRc == 0)) {
                     for (int i = 0; i < fieldCount; i++) {
                         if (!requested[i]) continue;
                         writeRc[i] = write_prop_u16(dev, preset_fields[i].code, values[i]);
@@ -1788,7 +1914,7 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            print_preset_write_result(id, slot, slotSelRc, nameRequested, nameRc,
+            print_preset_write_result(id, slot, slotSelRc, baselineReadRc, nameRequested, nameRc,
                                       preset_fields, requested, values, writeRc, verifyRc, fieldCount, wasEmptySlot);
             fflush(stdout);
             continue;
