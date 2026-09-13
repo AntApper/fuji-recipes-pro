@@ -365,7 +365,7 @@ public struct CameraConnectionView: View {
             let result = await manager.refreshCameraSlots(into: loadouts, overwriteDirtyDrafts: overwriteDrafts)
             slotRefreshMessage = result.isComplete
                 ? "Read all seven camera slots."
-                : "Partial read: \(result.presets.count)/7. Failed \(result.failures.map { "C\($0.slot)" }.joined(separator: ", "))."
+                : "Partial read: \(result.presets.count)/7. \(result.failures.map(\.description).joined(separator: "; "))"
         }
     }
 

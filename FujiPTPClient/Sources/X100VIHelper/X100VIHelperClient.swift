@@ -235,13 +235,50 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
     public func readPresetSlot(_ index: Int) async throws -> PTPClientPresetData {
         let response = try await sendCommand("read_preset_slot", params: ["index": index])
 
+        if let retryCode = transientSlotSelectionCode(in: response) {
+            do {
+                try await reconnect()
+            } catch {
+                throw PTPError.readFailed(
+                    0xD18C,
+                    "slot_selection failed (\(formattedHelperCode(retryCode))); reconnect retry failed: \(error.localizedDescription)"
+                )
+            }
+            return try await readPresetSlotWithoutRetry(index)
+        }
+
+        if let propertyFailure = presetPropertyReadFailure(in: response) {
+            do {
+                try await reconnect()
+            } catch {
+                throw PTPError.readFailed(
+                    0xD18C,
+                    "\(propertyFailure); reconnect retry failed: \(error.localizedDescription)"
+                )
+            }
+            return try await readPresetSlotWithoutRetry(index)
+        }
+
+        return try parsePresetSlotResponse(response, index: index)
+    }
+
+    private func readPresetSlotWithoutRetry(_ index: Int) async throws -> PTPClientPresetData {
+        let response = try await sendCommand("read_preset_slot", params: ["index": index])
+        return try parsePresetSlotResponse(response, index: index)
+    }
+
+    private func parsePresetSlotResponse(
+        _ response: [String: Any],
+        index: Int
+    ) throws -> PTPClientPresetData {
         guard response["success"] as? Bool == true,
               let result = response["result"] as? [String: Any],
               let properties = result["properties"] as? [String: [String: Any]] else {
-            let reason = response["error"] as? String
-                ?? ((response["result"] as? [String: Any])?["error"] as? String)
-                ?? "invalid preset slot response"
+            let reason = presetSlotFailureDetails(response)
             throw PTPError.readFailed(0xD18C, reason)
+        }
+        if let propertyFailure = presetPropertyReadFailure(in: response) {
+            throw PTPError.readFailed(0xD18C, propertyFailure)
         }
         let isEmptySlot = result["is_empty_slot"] as? Bool ?? false
 
@@ -338,7 +375,32 @@ public final class X100VIHelperClient: PTPClientProtocol, @unchecked Sendable {
         let params = Self.presetWriteParameters(index: index, data: data)
 
         let response = try await sendCommand("write_preset_slot", params: params)
+        if let retryCode = transientSlotSelectionCode(in: response) {
+            do {
+                try await reconnect()
+            } catch {
+                throw PTPError.writeFailed(
+                    0xD18C,
+                    "slot_selection failed (\(formattedHelperCode(retryCode))); reconnect retry failed: \(error.localizedDescription)"
+                )
+            }
+            return try await writePresetSlotWithoutRetry(index, params: params)
+        }
+        return try parsePresetWriteResponse(response, index: index)
+    }
 
+    private func writePresetSlotWithoutRetry(
+        _ index: Int,
+        params: [String: any Sendable]
+    ) async throws -> PTPPresetSlotWriteResult {
+        let response = try await sendCommand("write_preset_slot", params: params)
+        return try parsePresetWriteResponse(response, index: index)
+    }
+
+    private func parsePresetWriteResponse(
+        _ response: [String: Any],
+        index: Int
+    ) throws -> PTPPresetSlotWriteResult {
         let result = response["result"] as? [String: Any]
         guard response["success"] as? Bool == true,
               let result,
@@ -907,6 +969,58 @@ private func jsonInt32(_ value: Any?) -> Int32? {
     return nil
 }
 
+private func helperInteger(_ value: Any?) -> Int? {
+    if let value = value as? Int { return value }
+    if let value = value as? NSNumber { return value.intValue }
+    if let value = value as? String { return Int(value) }
+    return nil
+}
+
+func formattedHelperCode(_ code: Int) -> String {
+    code >= 0
+        ? String(format: "PTP 0x%04X (%d)", code, code)
+        : "transport \(code)"
+}
+
+func transientSlotSelectionCode(in response: [String: Any]) -> Int? {
+    guard let result = response["result"] as? [String: Any],
+          result["failure_stage"] as? String == "slot_selection",
+          let code = helperInteger(result["slot_select_rc"]) else {
+        return nil
+    }
+
+    // DeviceBusy can clear after a fresh PTP session. Negative results are
+    // helper/libusb transport failures; retrying a selector-only failure is
+    // safe because no C-slot field has been written yet.
+    guard code == 0x2019 || (code < 0 && code != -400) else { return nil }
+    return code
+}
+
+func presetSlotFailureDetails(_ response: [String: Any]) -> String {
+    let result = response["result"] as? [String: Any]
+    let error = response["error"] as? String
+        ?? result?["error"] as? String
+        ?? "invalid preset slot response"
+    guard let stage = result?["failure_stage"] as? String,
+          let code = helperInteger(result?["slot_select_rc"]) else {
+        return error
+    }
+    return "\(stage) failed (\(formattedHelperCode(code))): \(error)"
+}
+
+func presetPropertyReadFailure(in response: [String: Any]) -> String? {
+    guard let result = response["result"] as? [String: Any],
+          let properties = result["properties"] as? [String: [String: Any]] else {
+        return nil
+    }
+
+    for key in properties.keys.sorted() {
+        guard let code = helperInteger(properties[key]?["rc"]), code != 0 else { continue }
+        return "\(key) read failed (\(formattedHelperCode(code)))"
+    }
+    return nil
+}
+
 /// Fuji's C-slot signed properties are transmitted as raw two-byte little-endian
 /// values.  JSON exposes that raw UInt16 so reconstruct its Int16 bit pattern.
 private func jsonPTPInt16(_ value: Any?) -> Int32? {
@@ -927,10 +1041,11 @@ private func presetWriteFailureDetails(
     result: [String: Any]?
 ) -> String {
     let errors = (result?["errors"] as? [[String: Any]])?.compactMap { error -> String? in
+        let stage = (error["stage"] as? String).map { "\($0): " } ?? ""
         let property = error["property"] as? String ?? error["key"] as? String ?? "unknown property"
         let raw = (error["requested_raw"] as? String).map { " requested \($0)" } ?? ""
         let rc = error["rc"].map { String(describing: $0) } ?? "unknown error"
-        return "\(property)\(raw): \(rc)"
+        return "\(stage)\(property)\(raw): \(rc)"
     } ?? []
     if !errors.isEmpty { return errors.joined(separator: ", ") }
     if let error = response["error"] as? String { return error }

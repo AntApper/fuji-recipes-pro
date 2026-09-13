@@ -93,7 +93,11 @@ public final class CameraManager: ObservableObject {
         }
         operation = result.failures.isEmpty ? .idle : .failed("Some camera slots could not be read")
         if !result.failures.isEmpty {
-            lastError = "Camera slot refresh was partial: \(result.failures.map(\.description).joined(separator: "; "))"
+            let failureDetails = result.failures.map(\.description).joined(separator: "; ")
+            let recoveryHint = result.failures.contains { $0.message.contains("slot_selection failed") }
+                ? " Slot selection could not acquire the camera PTP session. Close other camera apps, reconnect the USB cable, then retry."
+                : ""
+            lastError = "Camera slot refresh was partial: \(failureDetails)\(recoveryHint)"
         }
         return result
     }
